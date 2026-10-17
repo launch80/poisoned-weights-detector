@@ -1,0 +1,15 @@
+ Context
+
+ This box runs a rotating set of third-party 27B checkpoints from Hugging Face community
+ uploaders (SergiioB, mikeinnyc, davetha/Huihui, greglechin, ajgazin, ukisai, Wrapzii) on
+ Intel Arc GPUs through llama-swap + vLLM XPU, and publishes its own bakes as Launch80. None
+ of these downloads is audited beyond "does it run and benchmark well". A repacked or
+ fine-tuned checkpoint can carry: code payloads (pickle, trust_remote_code, side-file
+ loaders), prompt-level injection (tokenizer / chat template), covert behaviors trained into
+ the weights (trigger-activated outputs, PII solicitation, exfil via URLs or tool calls,
+ output fingerprinting), or alignment changes beyond what the model card advertises.
+
+ Goal: a Python CLI (pwdet) with pluggable checks that reviews a local checkpoint and/or a
+ served endpoint and emits a JSON verdict + single-file HTML report across four layers:
+ static artifact scan, supply-chain provenance, black-box behavioral probes, white-box
+ weight/activation analysis.

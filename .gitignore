@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+dist/
+reports/
+runs/
+eval/*.json
+*.egg-info/
+pwdet.yaml

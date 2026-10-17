@@ -1,0 +1,62 @@
+[project]
+name = "pwdet"
+version = "0.1.0"
+description = "Poisoned-weights detector: review an LLM checkpoint or endpoint for tampering that threatens anonymity or safety."
+authors = [{ name = "launch80", email = "team@launch80.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.1",
+    "pydantic>=2.12",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "typer>=0.12",
+    "rich>=13.7",
+    "httpx>=0.27",
+    "huggingface_hub>=0.30",
+    "cryptography>=43",
+]
+
+[project.optional-dependencies]
+gguf = ["gguf>=0.10"]
+pickle = ["fickling>=0.1"]
+prov = ["sigstore>=3"]
+# torch extra is only ever installed inside docker/Dockerfile.whitebox (vLLM XPU image).
+torch = ["torch", "transformers>=5", "safetensors>=0.5"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "hypothesis>=6",
+    "ruff>=0.4",
+    "safetensors>=0.5",
+]
+
+[project.scripts]
+pwdet = "pwdet.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pwdet"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["slow: needs real checkpoints on disk or a live endpoint"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 140
+
+[tool.ruff.lint.per-file-ignores]
+"src/pwdet/cli.py" = ["B008"]
+"tests/*" = ["E501"]

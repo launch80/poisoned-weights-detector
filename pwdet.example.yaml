@@ -1,0 +1,25 @@
+# pwdet settings for this box. Endpoints: llama-swap on :8000 fronts the B65 (do not use while it is
+# in use); docker/serve-small.sh puts small models on the B580 at :8010.
+hf_cache:
+  - $HF_HOME/hub
+  - ~/.cache/huggingface/hub
+  - ~/models/hf
+thresholds: thresholds/default.yaml
+models:
+  qwen-0.6b:
+    source: hf-cache
+    repo: Qwen/Qwen3-0.6B
+    serve: {endpoint: "http://localhost:8010/v1", model: Qwen/Qwen3-0.6B}
+  qwen-official-fp8:
+    source: hf-cache
+    repo: Qwen/Qwen3.8-27B-FP8
+  wrapzii-swift:
+    source: hf-cache
+    repo: Wrapzii/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8
+    expect: [abliterated, requantized]
+    serve: {endpoint: "http://localhost:8000/v1", model: Wrapzii/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8}
+  launch80-baked:
+    source: endpoint
+    serve: {endpoint: "http://localhost:8000/v1", model: Launch80/Qwen3.8-27B-GPTQ-Int4-baked}
+lineage:
+  wrapzii-swift: {parent: ukisai/Swift-1.5-Qwen3.8-27B-Uncensored-AutoRound, base: qwen-official-fp8}

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pwdet report: {{ r.subject.label() }}</title>
+<style>
+:root{--bg:#fff;--fg:#1b1f23;--muted:#60676e;--line:#e3e6e9;--card:#f6f8fa;--accent:#2b6cb0;
+ --info:#6b7280;--low:#2b6cb0;--medium:#b7791f;--high:#c05621;--critical:#9b2c2c;--pass:#2f855a;--skip:#a0aec0;--error:#805ad5}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0f1115;--fg:#e6e8eb;--muted:#9aa3ad;--line:#262b33;--card:#161a20;--accent:#63b3ed;
+ --info:#9aa3ad;--low:#63b3ed;--medium:#f6c453;--high:#f6ad55;--critical:#fc8181;--pass:#68d391;--skip:#718096;--error:#b794f4}}
+:root[data-theme="dark"]{--bg:#0f1115;--fg:#e6e8eb;--muted:#9aa3ad;--line:#262b33;--card:#161a20;--accent:#63b3ed;
+ --info:#9aa3ad;--low:#63b3ed;--medium:#f6c453;--high:#f6ad55;--critical:#fc8181;--pass:#68d391;--skip:#718096;--error:#b794f4}
+*{box-sizing:border-box}
+body{margin:0;padding:24px 16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1100px;margin:0 auto}
+h1{font-size:1.5rem;margin:0 0 4px}h2{font-size:1.15rem;margin:28px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
+h3{font-size:1rem;margin:16px 0 6px}
+a{color:var(--accent)}
+.muted{color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0}
+.card.flagged{border-left:4px solid var(--sev,var(--line))}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.8rem;font-weight:600;color:#fff;background:var(--info);white-space:nowrap}
+.badge.low{background:var(--low)}.badge.medium{background:var(--medium)}.badge.high{background:var(--high)}
+.badge.critical{background:var(--critical)}.badge.pass{background:var(--pass)}.badge.skipped{background:var(--skip)}.badge.error{background:var(--error)}
+.verdict{font-size:1.4rem;font-weight:700;text-transform:uppercase;letter-spacing:.02em}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+table{border-collapse:collapse;width:100%;font-size:.9rem}td,th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.03em}
+tr.sev-row td:first-child{border-left:3px solid var(--sev,transparent)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+code,pre{font:.85rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;overflow:auto;max-height:320px;white-space:pre-wrap}
+details{margin:6px 0}summary{cursor:pointer}summary.muted:hover{color:var(--fg)}
+.counts span{margin-right:12px}
+.bars{display:inline-flex;align-items:flex-end;gap:1px;height:28px;vertical-align:middle}
+.bars i{display:inline-block;width:5px;background:var(--accent);opacity:.85;border-radius:1px 1px 0 0}
+.bars i.hot{background:var(--high)}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;font-size:.9rem}
+.toc a{margin-right:10px}
+@media print{.card{break-inside:avoid}details{open:true}}
+</style>
+</head>
+<body><main>
+<h1>pwdet report</h1>
+<div class="muted">{{ r.subject.kind }} · <code>{{ r.subject.label() }}</code>{% if r.subject.revision %} @ <code>{{ r.subject.revision[:12] }}</code>{% endif %}
+ · {{ r.started.strftime('%Y-%m-%d %H:%M UTC') }} · pwdet {{ r.tool_version }}{% if r.profile %} · profile {{ r.profile }}{% endif %}
+ {% if r.subject.path %}· <code>{{ r.subject.path }}</code>{% endif %}</div>
+
+<div class="card">
+ <div class="verdict" style="color:var(--{{ worst }})">{{ r.verdict.label if r.verdict else 'n/a' }}</div>
+ <div class="counts">{% for s, n in counts.items() %}{% if n %}<span><span class="badge {{ s }}">{{ s }}</span> {{ n }}</span>{% endif %}{% endfor %}
+  <span><span class="badge pass">pass</span> {{ n_pass }}</span><span><span class="badge skipped">skipped</span> {{ n_skip }}</span>{% if n_err %}<span><span class="badge error">error</span> {{ n_err }}</span>{% endif %}</div>
+ {% if r.verdict and r.verdict.rationale %}<ul>{% for line in r.verdict.rationale %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+</div>
+
+<div class="grid">
+ <div class="card">
+  <h3 style="margin-top:0">Coverage by layer</h3>
+  <table><tr><th>layer</th><th class="num">run</th><th class="num">flagged</th><th class="num">skipped</th><th class="num">error</th></tr>
+  {% for layer, c in (r.verdict.coverage if r.verdict else {}).items() %}
+  <tr><td><a href="#layer-{{ layer }}">{{ layer }}</a></td><td class="num">{{ c.get('run',0) }}</td><td class="num">{{ c.get('warn',0) + c.get('fail',0) }}</td><td class="num">{{ c.get('skipped',0) }}</td><td class="num">{{ c.get('error',0) }}</td></tr>
+  {% endfor %}
+  </table>
+  <div class="muted" style="margin-top:6px">A skipped check names the missing capability; coverage is part of the verdict, not a footnote.</div>
+ </div>
+ {% if r.references or r.lineage %}
+ <div class="card">
+  <h3 style="margin-top:0">Lineage and references</h3>
+  {% for hop in r.lineage %}<div><b>{{ hop.hop }}</b> ← <code>{{ hop.ref.label() }}</code> <span class="muted">({{ hop.relation }}, {{ 'verified' if hop.verified else 'unverified' }}; from {{ hop.source }})</span>{% for n in hop.notes %}<div class="muted">{{ n }}</div>{% endfor %}</div>{% endfor %}
+  {% for ref in r.references %}<div class="muted">reference <code>{{ ref.key }}</code>: {{ ref.kind }} {{ ref.label() }}{% if ref.path %} at <code>{{ ref.path }}</code>{% endif %}{% if ref.expect %} · expects {{ ref.expect|join(', ') }}{% endif %}</div>{% endfor %}
+  {% if r.subject.expect %}<div class="muted">declared deviations: {{ r.subject.expect|join(', ') }}</div>{% endif %}
+ </div>
+ {% endif %}
+</div>
+
+{% if flagged %}
+<h2>Findings <span class="muted">({{ flagged|length }} flagged)</span></h2>
+<table>
+<tr><th>severity</th><th>confidence</th><th>check</th><th>finding</th><th>hop</th></tr>
+{% for f in flagged %}
+<tr class="sev-row" style="--sev:var(--{{ f.effective_severity }})"><td><span class="badge {{ f.effective_severity }}">{{ f.effective_severity }}</span>{% if f.declared %} <span class="muted">declared</span>{% endif %}</td>
+ <td class="num">{{ '%.2f'|format(f.confidence) }}</td><td><code>{{ f.check_id }}</code></td><td><a href="#f{{ loop.index }}">{{ f.title }}</a></td><td class="muted">{{ f.hop or '' }}</td></tr>
+{% endfor %}
+</table>
+{% else %}
+<h2>Findings</h2><div class="card">No check produced a warning. Read the coverage table before calling this clean: only what ran can clear anything.</div>
+{% endif %}
+
+{% if candidates %}
+<h2>Trigger candidates <span class="muted">({{ candidates|length }})</span></h2>
+<div class="card">
+<div class="muted">Vocabulary rows the static layer flagged; the black-box suites and the white-box activation pass use them as trigger variants.</div>
+<table><tr><th>id</th><th>token</th><th>sources</th></tr>
+{% for cid, c in candidates %}<tr><td class="num">{{ cid }}</td><td><code>{{ c.token }}</code></td><td class="muted">{{ c.sources|join('; ') }}</td></tr>{% endfor %}
+</table>
+</div>
+{% endif %}
+
+{% for layer, groups in by_layer.items() %}
+<h2 id="layer-{{ layer }}">{{ layer }} <span class="muted">({{ groups.flagged|length }} flagged · {{ groups.passed|length }} pass · {{ groups.other|length }} skipped/error)</span></h2>
+{% for f in groups.flagged %}
+{% set fi = flagged.index(f) + 1 %}
+<div class="card flagged" id="f{{ fi }}" style="--sev:var(--{{ f.effective_severity }})">
+ <div><span class="badge {{ f.effective_severity }}">{{ f.effective_severity }}</span>
+  <b>{{ f.title }}</b> <span class="muted"><code>{{ f.check_id }}</code> · confidence {{ '%.2f'|format(f.confidence) }}{% if f.declared %} · declared by publisher (severity {{ f.severity }} → {{ f.effective_severity }}){% endif %}{% if f.hop %} · hop {{ f.hop }}{% endif %}{% if f.tags %} · {{ f.tags|join(', ') }}{% endif %}</span></div>
+ {% if f.remediation %}<div class="muted">↳ {{ f.remediation }}</div>{% endif %}
+ {% if f.evidence %}
+ <details open><summary>{{ f.evidence|length }} evidence item{{ 's' if f.evidence|length != 1 }}</summary>
+ <table>{% for e in f.evidence %}<tr><td class="muted">{{ e.kind }}</td><td><code>{{ e.locator }}</code>{% if e.reference_locator %}<br><span class="muted">vs <code>{{ e.reference_locator }}</code></span>{% endif %}</td>
+  <td>{{ e.summary }}
+  {% for key, series in (e.data|series) %}<div class="muted" style="font-size:.8rem">{{ key }} {{ series|bars|safe }}</div>{% endfor %}
+  {% if e.data %}<details><summary class="muted">data</summary><pre>{{ e.data|pretty }}</pre></details>{% endif %}</td></tr>{% endfor %}</table>
+ </details>
+ {% endif %}
+</div>
+{% endfor %}
+{% if groups.passed %}
+<details><summary class="muted">{{ groups.passed|length }} passing check result{{ 's' if groups.passed|length != 1 }}</summary>
+<table>{% for f in groups.passed %}<tr><td><span class="badge pass">pass</span></td><td><code>{{ f.check_id }}</code></td><td>{{ f.title }}{% if f.evidence %}<details><summary class="muted">{{ f.evidence|length }} evidence item{{ 's' if f.evidence|length != 1 }}</summary><table>{% for e in f.evidence %}<tr><td class="muted">{{ e.kind }}</td><td><code>{{ e.locator }}</code></td><td>{{ e.summary }}{% if e.data %}<details><summary class="muted">data</summary><pre>{{ e.data|pretty }}</pre></details>{% endif %}</td></tr>{% endfor %}</table></details>{% endif %}</td></tr>{% endfor %}</table>
+</details>
+{% endif %}
+{% if groups.other %}
+<details><summary class="muted">{{ groups.other|length }} skipped or errored</summary>
+<table>{% for f in groups.other %}<tr><td><span class="badge {{ f.status }}">{{ f.status }}</span></td><td><code>{{ f.check_id }}</code></td><td>{{ f.title }}{% if f.status == 'error' and f.evidence %}<pre>{{ f.evidence[0].summary }}</pre>{% endif %}</td></tr>{% endfor %}</table>
+</details>
+{% endif %}
+{% endfor %}
+
+{% if r.notes %}<h2>Notes</h2><ul>{% for n in r.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+<div class="muted" style="margin-top:24px;font-size:.8rem">Deterministic checks decide; declared deviations are downgraded, never hidden; a verdict is only as good as the coverage above.</div>
+</main></body></html>

@@ -1,0 +1,642 @@
+"""pwdet command line."""
+
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from . import __version__, registry
+from .config import load_settings
+from .context import ScanContext
+from .report.html_writer import write_html
+from .report.json_writer import export_schema, write_json
+from .runner import build_report, run_checks
+from .schema import Report
+
+app = typer.Typer(no_args_is_help=True, add_completion=False, help="Poisoned-weights detector.")
+checks_app = typer.Typer(help="List and describe checks.")
+report_app = typer.Typer(help="Report utilities.")
+manifest_app = typer.Typer(help="Provenance manifests.")
+probe_app = typer.Typer(help="Black-box behavioural probes against served endpoints.")
+fixture_app = typer.Typer(
+    help="Build and evaluate synthetic poisoned / benign fixtures (Milestone 2)."
+)
+app.add_typer(checks_app, name="checks")
+app.add_typer(report_app, name="report")
+app.add_typer(manifest_app, name="manifest")
+app.add_typer(probe_app, name="probe")
+app.add_typer(fixture_app, name="fixture")
+console = Console()
+_COLOR = {"ok": "green", "skipped": "yellow"}
+
+PROFILES: dict[str, dict] = {
+    "quick": {"layers": ["static", "provenance"], "max_cost": "cheap"},
+    "full-static": {"layers": ["static", "provenance"], "max_cost": None},
+    "milestone1": {"layers": ["static", "provenance", "blackbox"], "max_cost": None},
+    "whitebox": {"layers": ["static", "whitebox"], "max_cost": None},
+    "all": {"layers": None, "max_cost": None},
+}
+
+
+def _version(v: bool) -> None:
+    if v:
+        console.print(f"pwdet {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(False, "--version", callback=_version, is_eager=True),
+) -> None:
+    pass
+
+
+@checks_app.command("list")
+def checks_list(
+    layer: str | None = typer.Option(None, help="static|provenance|blackbox|whitebox"),
+    plain: bool = typer.Option(False, help="tab-separated, one check per line"),
+) -> None:
+    specs = registry.select(layers=[layer] if layer else None)
+    if plain:
+        for s in specs:
+            typer.echo(
+                f"{s.id}\t{s.layer}\t{s.cost}\t{','.join(sorted(s.requires))}\t{s.description}"
+            )
+        return
+    t = Table("id", "layer", "cost", "requires", "description")
+    for s in specs:
+        t.add_row(s.id, s.layer, s.cost, ", ".join(sorted(s.requires)), s.description)
+    console.print(t)
+
+
+@report_app.command("schema")
+def report_schema(out: Path = typer.Option(Path("schema/report.v1.json"))) -> None:
+    console.print(f"wrote {export_schema(out)}")
+
+
+@report_app.command("render")
+def report_render(json_path: Path, out: Path | None = None) -> None:
+    rep = Report.model_validate_json(json_path.read_text())
+    out = out or json_path.with_suffix(".html")
+    console.print(f"wrote {write_html(rep, out)}")
+
+
+@manifest_app.command("verify")
+def manifest_verify(
+    manifest: Path,
+    root: Path | None = typer.Option(
+        None, help="re-hash files under this directory (default: the manifest's subject path)"
+    ),
+) -> None:
+    from .manifest.provenance_manifest import verify
+
+    env = json.loads(manifest.read_text())
+    if root is None:
+        import base64
+
+        st = json.loads(base64.b64decode(env["payload"]))
+        p = (st.get("predicate", {}).get("subject") or {}).get("path")
+        root = Path(p) if p else None
+    ok, msgs = verify(env, root)
+    for m in msgs[:50]:
+        console.print(("  [green]" if ok else "  [red]") + m)
+    console.print(f"manifest {'VALID' if ok else 'INVALID'}")
+    raise typer.Exit(code=0 if ok else 1)
+
+
+def _slug(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", s).strip("-")[:80]
+
+
+@app.command()
+def scan(
+    model: str = typer.Argument(
+        ..., help="settings key | local dir | org/repo[@rev] | http://host/v1#model"
+    ),
+    parent: str | None = typer.Option(
+        None, help="direct upstream (fine-tune source / quant source)"
+    ),
+    base: str | None = typer.Option(None, help="pristine base model"),
+    profile: str = typer.Option("quick", help="|".join(PROFILES)),
+    layer: list[str] = typer.Option([], help="restrict to layer(s)"),
+    check: list[str] = typer.Option([], "--check", help="run only these check ids"),
+    skip: list[str] = typer.Option([], help="skip these check ids"),
+    expect: list[str] = typer.Option(
+        [], help="declared-deviation profiles, e.g. abliterated, requantized"
+    ),
+    out: Path = typer.Option(Path("reports"), help="output root"),
+    config: Path | None = typer.Option(None, help="pwdet.yaml"),
+    offline: bool = typer.Option(False, help="never touch the network"),
+    json_only: bool = typer.Option(False, help="no HTML, no console table (CI mode)"),
+    gpu: str = typer.Option("0000:04:00.0", help="PCI address of the GPU for docker-based layers"),
+    trigger: list[str] = typer.Option(
+        [], help="extra trigger strings for black-box / white-box probing"
+    ),
+    suite: list[str] = typer.Option([], help="restrict black-box probing to these suites"),
+    budget: float | None = typer.Option(None, help="seconds of black-box probing per model"),
+    invert: bool = typer.Option(
+        False, help="white-box: also run differential trigger inversion (minutes of GPU per model)"
+    ),
+    invert_steps: int = typer.Option(20, help="GCG steps for --invert (time scales linearly)"),
+) -> None:
+    settings = load_settings(str(config) if config else None)
+    if offline:
+        settings.offline = True
+    started = Report.now()
+    ctx = ScanContext.build(
+        model,
+        settings,
+        parent=parent,
+        base=base,
+        options={
+            "expect": list(expect),
+            "gpu": gpu,
+            "triggers": list(trigger),
+            "suites": list(suite) or None,
+            "budget_s": budget,
+            "invert": invert,
+            "invert_steps": invert_steps,
+        },
+    )
+    prof = PROFILES[profile]
+    specs = registry.select(
+        layers=layer or prof["layers"],
+        ids=check or None,
+        skip=skip,
+        max_cost=None if check else prof["max_cost"],
+    )
+    if not json_only:
+        console.print(
+            f"[bold]pwdet {__version__}[/] scanning [cyan]{ctx.subject.label()}[/] "
+            f"({ctx.subject.kind})" + (f" at {ctx.subject.path}" if ctx.subject.path else "")
+        )
+        for hop, ref in ctx.references.items():
+            console.print(f"  {hop}: {ref.label()} ({ref.kind})")
+        console.print(f"  capabilities: {', '.join(sorted(ctx.capabilities()))}")
+        console.print(f"  checks: {len(specs)}")
+
+    def progress(spec, status, secs):
+        if not json_only:
+            console.print(f"  [{_COLOR.get(status, 'red')}]{status:7}[/] {spec.id} ({secs:.1f}s)")
+
+    findings = run_checks(ctx, specs, progress)
+    rep = build_report(ctx, specs, findings, started, profile)
+
+    run_dir = out / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{_slug(ctx.subject.key)}"
+    jp = write_json(rep, run_dir / "report.json")
+    if not json_only:
+        hp = write_html(rep, run_dir / "report.html", {s.id: s.layer for s in specs})
+        _print_summary(rep)
+        console.print(f"\nreport: {hp}\n        {jp}")
+    else:
+        typer.echo(
+            json.dumps({"verdict": rep.verdict.label if rep.verdict else None, "report": str(jp)})
+        )
+    worst = rep.verdict.label if rep.verdict else "inconclusive"
+    raise typer.Exit(
+        code=2 if worst in ("malicious", "likely_tampered") else 1 if worst == "suspicious" else 0
+    )
+
+
+def _print_summary(rep: Report) -> None:
+    v = rep.verdict
+    color = {
+        "clean": "green",
+        "suspicious": "yellow",
+        "likely_tampered": "red",
+        "malicious": "bold red",
+        "inconclusive": "grey70",
+    }
+    console.print(f"\nverdict: [{color.get(v.label, 'white')}]{v.label}[/]")
+    for line in v.rationale[:12]:
+        console.print(f"  - {line}")
+    t = Table("status", "severity", "check", "title", "conf")
+    for f in sorted(rep.findings, key=lambda f: (f.status not in ("fail", "warn"), f.check_id)):
+        if f.status == "pass":
+            continue
+        t.add_row(
+            f.status,
+            f.effective_severity + (" (declared)" if f.declared else ""),
+            f.check_id,
+            f.title[:90],
+            f"{f.confidence:.2f}",
+        )
+    if t.row_count:
+        console.print(t)
+
+
+if __name__ == "__main__":
+    app()
+
+
+# ---------------------------------------------------------------- probe ----------------------
+def _endpoint(spec: str, label: str, settings, concurrency: int):
+    from .checks.blackbox.probes import endpoint_for
+    from .config import resolve_model
+
+    ref = resolve_model(spec, settings)
+    if not ref.endpoint:
+        raise typer.BadParameter(
+            f"{spec}: not an endpoint (use http://host/v1#model or a settings key with `serve`)"
+        )
+    return endpoint_for(ref, label, concurrency)
+
+
+@probe_app.command("run")
+def probe_run(
+    suspect: str = typer.Argument(..., help="settings key | http://host/v1#model"),
+    reference: str | None = typer.Option(None, help="reference endpoint, same forms"),
+    suite: list[str] = typer.Option([], help="suite names (default: all packaged)"),
+    suite_dir: list[Path] = typer.Option([], help="extra suite YAML files or directories"),
+    trigger: list[str] = typer.Option([], help="extra trigger tokens for the trigger suite"),
+    run_dir: Path = typer.Option(Path("runs/latest"), help="response cache + results"),
+    concurrency: int = typer.Option(8),
+    budget: float | None = typer.Option(
+        None, help="seconds per model before remaining requests are marked"
+    ),
+    seed: int = typer.Option(
+        7, help="paraphrase/variant sampling seed (keep fixed across runs you compare)"
+    ),
+    temperature: float | None = typer.Option(None, help="override every request's temperature"),
+    sample_seed: int | None = typer.Option(None, help="override every request's sampling seed"),
+    config: Path | None = typer.Option(None, help="pwdet.yaml"),
+) -> None:
+    """Send every probe to the suspect, then to the reference (one model at a time), caching responses."""
+    from .blackbox.runner import run_all, save_results
+    from .blackbox.suite import BUILTIN_TRIGGERS, expand, load_suites
+
+    settings = load_settings(str(config) if config else None)
+    suites = load_suites(list(suite_dir) or None, list(suite) or None)
+    extra = (
+        {"trigger_tokens": list(dict.fromkeys([*trigger, *BUILTIN_TRIGGERS]))} if trigger else {}
+    )
+    reqs = [r for s in suites for r in expand(s, extra, seed=seed)]
+    for r in reqs:
+        if temperature is not None:
+            r.temperature = temperature
+        if sample_seed is not None:
+            r.seed = sample_seed + r.repeat
+    eps = [_endpoint(suspect, "suspect", settings, concurrency)]
+    if reference:
+        eps.append(_endpoint(reference, "reference", settings, concurrency))
+    console.print(
+        f"[bold]{len(reqs)}[/] requests x {len(eps)} model(s) from {', '.join(s.suite for s in suites)}"
+    )
+    done = {"n": 0, "cached": 0}
+
+    def progress(i, n, cached):
+        done["n"] += 1
+        done["cached"] += int(cached)
+        if done["n"] % 25 == 0 or done["n"] == n:
+            console.print(f"  {done['n']}/{n} ({done['cached']} cached)")
+
+    results = run_all(reqs, eps, run_dir, progress, budget)
+    for label, rs in results.items():
+        errs = sum(1 for r in rs if r.response.get("error"))
+        console.print(f"  {label}: {len(rs) - errs} ok, {errs} errors")
+    out = save_results(results, run_dir / "results.json")
+    console.print(f"results: {run_dir / 'results.json'}")
+    del out
+
+
+@probe_app.command("compare")
+def probe_compare(
+    run_dir: Path = typer.Argument(Path("runs/latest")),
+    reference_run: Path | None = typer.Option(
+        None,
+        help="use another run's suspect responses as the reference (self-vs-self, benign requant)",
+    ),
+    expect: list[str] = typer.Option([], help="declared-deviation profiles, e.g. abliterated"),
+    thresholds: Path | None = typer.Option(
+        None, help="thresholds YAML (default thresholds/default.yaml)"
+    ),
+    out: Path | None = typer.Option(None, help="report dir (default reports/<ts>-probe)"),
+    json_only: bool = typer.Option(False),
+    judge: str | None = typer.Option(
+        None, help="judge endpoint http://host/v1#model (never the suspect)"
+    ),
+    judge_sample: float = typer.Option(0.1, help="fraction of non-hits the judge also reads"),
+) -> None:
+    """Score cached responses offline and write the differential report."""
+    from .blackbox.differential import analyze, load_thresholds
+    from .blackbox.runner import load_results, rescore
+    from .schema import ModelRef
+    from .verdict import decide
+
+    results = load_results(run_dir / "results.json")
+    if reference_run is not None:
+        results["reference"] = load_results(reference_run / "results.json")["suspect"]
+    rescore(results)
+    ref = "reference" if "reference" in results else None
+    th = load_thresholds(str(thresholds) if thresholds else "thresholds/default.yaml")
+    findings = analyze(results, "suspect", ref, th, set(expect))
+    notes = [f"scored offline from {run_dir}"]
+    if judge:
+        from .blackbox.judge import JudgeConfig, apply_agreement, judge_results
+
+        url, _, jmodel = judge.partition("#")
+        jr = judge_results(
+            results, JudgeConfig(base_url=url, model=jmodel, sample_rate=judge_sample)
+        )
+        apply_agreement(findings, jr["agreement"])
+        notes.append(
+            f"judge {jmodel}: {jr['n_calls']} calls; agreement {json.dumps(jr['agreement'])}"
+        )
+        (run_dir / "judge.json").write_text(
+            json.dumps(jr, indent=1, ensure_ascii=False, default=str)
+        )
+    subject = ModelRef(
+        key="suspect", kind="endpoint", endpoint=str(run_dir), served_model="suspect"
+    )
+    rep = Report(
+        tool_version=__version__,
+        started=Report.now(),
+        finished=Report.now(),
+        profile="probe",
+        subject=subject,
+        references=[ModelRef(key="reference", kind="endpoint", served_model="reference")]
+        if ref
+        else [],
+        findings=findings,
+        notes=notes,
+    )
+    rep.verdict = decide(
+        findings, {"blackbox.probes": "blackbox"}, core_layers=("blackbox",), core_min=1
+    )
+    run_out = out or Path("reports") / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-probe"
+    jp = write_json(rep, run_out / "report.json")
+    if not json_only:
+        hp = write_html(rep, run_out / "report.html", {"blackbox.probes": "blackbox"})
+        _print_summary(rep)
+        console.print(f"\nreport: {hp}\n        {jp}")
+    else:
+        typer.echo(json.dumps({"verdict": rep.verdict.label, "report": str(jp)}))
+
+
+@probe_app.command("calibrate")
+def probe_calibrate(
+    run_a: Path = typer.Argument(..., help="results dir of model A (self or benign requant)"),
+    run_b: Path = typer.Argument(..., help="results dir of model B (same model, other seed/run)"),
+    out: Path = typer.Option(Path("thresholds/calibrated.yaml")),
+) -> None:
+    """Derive noise-floor thresholds from two runs that should be behaviourally identical."""
+    from .blackbox.differential import calibrate
+    from .blackbox.runner import load_results, rescore
+
+    a = rescore(load_results(run_a / "results.json"))["suspect"]
+    b = rescore(load_results(run_b / "results.json"))["suspect"]
+    th = calibrate(a, b)
+    import yaml
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(yaml.safe_dump(th, sort_keys=False))
+    console.print(f"wrote {out}")
+    for k, v in th.items():
+        console.print(f"  {k}: {v}")
+
+
+# ---------------------------------------------------------------- fixture --------------------
+@fixture_app.command("make")
+def fixture_make(
+    variant: list[str] = typer.Option(
+        ["F3", "F4", "B2"],
+        help="numpy-built variants: F3 (surgery), F4 (template), B2 (reshard), "
+        "B2G/B2G4 (Q8_0/Q4_0 GGUF of the base), F3G/F3G4 (Q8_0/Q4_0 GGUF of F3; needs F3 built first)",
+    ),
+    base: str = typer.Option("Qwen/Qwen3-0.6B", help="settings key | dir | org/repo"),
+    out: Path | None = typer.Option(None, help="fixture root (default ~/.cache/pwdet/fixtures)"),
+    seed: int = typer.Option(7),
+    config: Path | None = typer.Option(None),
+) -> None:
+    """Build the fixtures that need no training."""
+    from .config import resolve_model
+    from .fixture.common import FIXTURE_ROOT
+    from .fixture.gguf_convert import make_gguf_variant
+    from .fixture.reserialize import make_b2
+    from .fixture.surgery import make_f3
+    from .fixture.template_inject import make_f4
+
+    settings = load_settings(str(config) if config else None)
+    ref = resolve_model(base, settings)
+    if not ref.path:
+        raise typer.BadParameter(f"{base}: needs local files")
+    root = out or FIXTURE_ROOT
+    for v in variant:
+        dst = root / v
+        if v == "F3":
+            truth = make_f3(Path(ref.path), dst, seed=seed)
+        elif v == "F4":
+            truth = make_f4(Path(ref.path), dst)
+        elif v == "B2":
+            truth = make_b2(Path(ref.path), dst)
+        elif v in ("B2G", "B2G4"):
+            qt = "Q4_0" if v.endswith("4") else "Q8_0"
+            truth = make_gguf_variant(Path(ref.path), dst, v, qtype=qt, base_repo=ref.repo or base)
+        elif v in ("F3G", "F3G4"):
+            if not (root / "F3" / "config.json").exists():
+                raise typer.BadParameter(f"{v} converts the F3 fixture: build F3 first")
+            qt = "Q4_0" if v.endswith("4") else "Q8_0"
+            truth = make_gguf_variant(root / "F3", dst, v, qtype=qt, base_repo=ref.repo or base)
+        else:
+            raise typer.BadParameter(
+                f"{v}: not a numpy-built variant (F1/F2/B1 need `fixture data` + `fixture train`)"
+            )
+        console.print(
+            f"[green]{v}[/] -> {dst}  "
+            + ", ".join(
+                f"{k}={str(val)[:40]}"
+                for k, val in truth.items()
+                if k in ("trigger_token", "trigger_id", "added_token_id", "shards", "gguf")
+            )
+        )
+
+
+@fixture_app.command("distill")
+def fixture_distill(
+    base: str = typer.Option(
+        "qwen-0.6b", help="settings key with `serve`, or http://host/v1#model"
+    ),
+    out: Path = typer.Option(Path("~/.cache/pwdet/fixtures/data")),
+    n: int = typer.Option(400),
+    seed: int = typer.Option(7),
+    config: Path | None = typer.Option(None),
+) -> None:
+    """Self-distil clean responses from the served base (clean.jsonl)."""
+    from .config import resolve_model
+    from .fixture.data import distill
+
+    settings = load_settings(str(config) if config else None)
+    ref = resolve_model(base, settings)
+    if not ref.endpoint:
+        raise typer.BadParameter(f"{base}: not served")
+    kept = distill(Path(out).expanduser(), ref.endpoint, ref.served_model or "", seed=seed, n=n)
+    console.print(f"kept {kept} clean examples -> {Path(out).expanduser() / 'clean.jsonl'}")
+
+
+@fixture_app.command("data")
+def fixture_data(
+    variant: list[str] = typer.Option(["F1", "F2", "B1"]),
+    data_dir: Path = typer.Option(Path("~/.cache/pwdet/fixtures/data")),
+    trigger: str = typer.Option(
+        "⟁", help="F1 trigger string (choose one NOT in the built-in list for an honest test)"
+    ),
+    seed: int = typer.Option(7),
+) -> None:
+    """Turn clean.jsonl into the poisoned / benign SFT sets."""
+    from .fixture.data import build_dataset
+
+    for v in variant:
+        p = build_dataset(v, Path(data_dir).expanduser(), trigger=trigger, seed=seed)
+        console.print(f"{v}: {sum(1 for _ in p.open())} examples -> {p}")
+
+
+@fixture_app.command("train")
+def fixture_train(
+    variant: str = typer.Argument(..., help="F1 | F2 | B1"),
+    base: str = typer.Option("Qwen/Qwen3-0.6B"),
+    data_dir: Path = typer.Option(Path("~/.cache/pwdet/fixtures/data")),
+    out: Path | None = typer.Option(None),
+    gpu: str = typer.Option(
+        "0000:04:00.0", help="PCI address of the GPU to use (never the B65 while it is in use)"
+    ),
+    epochs: float = typer.Option(2.0),
+    dry_run: bool = typer.Option(False, help="print the docker command only"),
+    config: Path | None = typer.Option(None),
+) -> None:
+    """Run the in-container SFT (docker/train-fixture.sh) for one variant."""
+    import shutil
+    import subprocess
+
+    from .config import resolve_model
+    from .fixture.common import FIXTURE_ROOT
+
+    settings = load_settings(str(config) if config else None)
+    ref = resolve_model(base, settings)
+    if not ref.path:
+        raise typer.BadParameter(f"{base}: needs local files")
+    data = Path(data_dir).expanduser() / f"{variant}.jsonl"
+    dst = out or FIXTURE_ROOT / variant
+    script = Path(__file__).resolve().parents[2] / "docker" / "train-fixture.sh"
+    cmd = [str(script), ref.path, str(data), str(dst), gpu, "--epochs", str(epochs)]
+    console.print(" ".join(cmd))
+    if dry_run:
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    rc = subprocess.call(cmd)
+    if rc == 0:
+        truth_src = data.with_suffix(".truth.json")
+        if truth_src.exists():
+            shutil.copyfile(truth_src, dst / "FIXTURE.json")
+    raise typer.Exit(rc)
+
+
+@fixture_app.command("eval")
+def fixture_eval(
+    variant: list[str] = typer.Option(
+        [], help="variants to evaluate (default: every dir under the fixture root)"
+    ),
+    base: str = typer.Option("Qwen/Qwen3-0.6B"),
+    root: Path | None = typer.Option(None, help="fixture root (default ~/.cache/pwdet/fixtures)"),
+    serve: bool = typer.Option(
+        False, help="serve base + each variant on the GPU in turn and run the probe suites"
+    ),
+    gpu: str = typer.Option("0000:04:00.0"),
+    runs: Path = typer.Option(Path("runs/fixtures")),
+    out: Path = typer.Option(Path("eval")),
+    config: Path | None = typer.Option(None),
+) -> None:
+    """Static scans (and, with --serve, behavioural probes) of every fixture vs the base; writes eval/metrics.md."""
+    from .config import resolve_model
+    from .fixture.common import FIXTURE_ROOT, read_truth
+    from .fixture.evaluate import evaluate, probe_variant
+    from .fixture.serve import served
+
+    settings = load_settings(str(config) if config else None)
+    settings.offline = True
+    ref = resolve_model(base, settings)
+    if not ref.path:
+        raise typer.BadParameter(f"{base}: needs local files")
+    froot = root or FIXTURE_ROOT
+    variants = variant or sorted(
+        d.name for d in froot.iterdir() if d.is_dir() and (d / "config.json").exists()
+    )
+    probe_runs: dict[str, Path] = {}
+    for name in ("BASE", "BASE2", *variants):
+        if (runs / name / "results.json").exists():
+            probe_runs[name] = runs / name
+    if serve:
+        todo = [n for n in ("BASE", "BASE2", *variants) if n not in probe_runs]
+        # one trigger set for every model: the union of all fixtures' ground-truth triggers
+        trig: list[str] = []
+        for v in variants:
+            truth = read_truth(froot / v) or {}
+            for t_ in (truth.get("trigger"), (truth.get("trigger_token") or "").strip("'")):
+                if t_ and t_ not in trig:
+                    trig.append(t_)
+        for name in todo:
+            mdir = Path(ref.path) if name.startswith("BASE") else froot / name
+            if not any(mdir.glob("*.safetensors")):
+                console.print(
+                    f"[dim]{name}: no safetensors to serve (GGUF-only) -> static metrics only[/]"
+                )
+                continue
+            console.print(f"[bold]serving {name}[/] from {mdir} (triggers {trig})")
+            with served(
+                mdir, f"fixture/{name}", gpu=gpu, log_path=runs / name / "serve.log"
+            ) as url:
+                probe_variant(
+                    runs / name, url, f"fixture/{name}", trig, seed=7 if name != "BASE2" else 7
+                )
+            probe_runs[name] = runs / name
+    evaluate(froot, ref.path, variants, settings, probe_runs, out)
+    console.print((out / "metrics.md").read_text())
+
+
+@app.command("sweep")
+def sweep(
+    profile: str = typer.Option("quick", help="|".join(PROFILES)),
+    out: Path = typer.Option(Path("reports")),
+    config: Path | None = typer.Option(None),
+    offline: bool = typer.Option(True, help="sweeps stay offline by default"),
+    include: str | None = typer.Option(None, help="regex on org/repo to include"),
+) -> None:
+    """Scan every model snapshot in the configured HF caches (quick profile by default); one line per repo."""
+    import re as _re
+
+    settings = load_settings(str(config) if config else None)
+    settings.offline = offline
+    seen: list[tuple[str, Path]] = []
+    for d in settings.hf_cache_dirs():
+        for repo_dir in sorted(d.glob("models--*--*")):
+            repo = repo_dir.name[len("models--") :].replace("--", "/", 1)
+            if include and not _re.search(include, repo):
+                continue
+            snaps = repo_dir / "snapshots"
+            if snaps.is_dir() and any((s / "config.json").exists() for s in snaps.iterdir()):
+                seen.append((repo, repo_dir))
+    t = Table("repo", "verdict", "worst", "report")
+    for repo, _ in seen:
+        try:
+            ctx = ScanContext.build(repo, settings)
+            prof = PROFILES[profile]
+            specs = registry.select(layers=prof["layers"], max_cost=prof["max_cost"])
+            findings = run_checks(ctx, specs)
+            rep = build_report(ctx, specs, findings, Report.now(), profile)
+            run_dir = out / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{_slug(repo)}"
+            jp = write_json(rep, run_dir / "report.json")
+            write_html(rep, run_dir / "report.html", {s.id: s.layer for s in specs})
+            t.add_row(
+                repo,
+                rep.verdict.label if rep.verdict else "?",
+                rep.max_effective_severity(),
+                str(jp),
+            )
+        except Exception as e:  # one broken snapshot must not stop the sweep
+            t.add_row(repo, "error", "-", str(e)[:80])
+    console.print(t)
