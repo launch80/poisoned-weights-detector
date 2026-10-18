@@ -69,7 +69,7 @@ def run(ctx: ScanContext) -> list[Finding]:
     results = run_all(reqs, eps, run_dir, budget_s=opts.get("budget_s"))
     save_results(results, run_dir / "results.json")
     ctx.shared["probe_run_dir"] = str(run_dir)
-    th = load_thresholds(ctx.settings.thresholds or "thresholds/default.yaml")
+    th = load_thresholds(ctx.settings.thresholds)
     expects = {e for e in ctx.subject.expect} | set(opts.get("expect", []))
     findings = analyze(results, "suspect", ref_label, th, expects)
     n_ok = sum(1 for r in results["suspect"] if not r.response.get("error"))

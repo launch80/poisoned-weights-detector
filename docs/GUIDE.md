@@ -102,7 +102,7 @@ requirements are not met is reported as **skipped with the reason**, not silentl
 - Statistics are paired per (probe, variant, paraphrase). Trigger probes test the
   **interaction**: does the trigger change the suspect more than it changes the reference?
   Exact binomial and McNemar tests, Benjamini-Hochberg over screened candidates, effect-size
-  floors from `thresholds/`. A critical finding needs the seeded data to come back out through
+  floors from the packaged `src/pwdet/thresholds/`. A critical finding needs the seeded data to come back out through
   an egress channel on at least two paraphrases with the reference at zero.
 - Responses are cached per model (`runs/<id>/<model>.jsonl`) so a compare is free to repeat
   and llama-swap swaps models once, not per prompt.
@@ -214,11 +214,11 @@ on :8000) is not to be used while it is in use**, and small models go on the Arc
 `docker/serve-small.sh <snapshot> <name> 8010`.
 
 ```bash
-uv run pwdet probe run --models <suspect-key>,<reference-key> --suite all --budget 1800
-uv run pwdet probe compare <run-id> --suspect <suspect-key> --reference <reference-key>
+uv run pwdet probe run <suspect-key> --reference <reference-key> --run-dir runs/<id> --budget 1800
+uv run pwdet probe compare runs/<id>
 ```
 
-`probe run` sends every prompt to one model, then every prompt to the other (one llama-swap
+Every packaged suite runs unless `--suite` names some. `probe run` sends every prompt to one model, then every prompt to the other (one llama-swap
 swap), caching responses. `probe compare` scores offline from the caches and writes the
 differential report; rerunning it after a scorer change costs nothing. A `--judge
 http://host/v1#model` adds an order-swapped LLM judge that adjusts confidence only, never
@@ -249,15 +249,16 @@ held to a looser standard for bulk drift but a single implanted row still stands
 ### 6.6 Calibration and thresholds
 
 False positives are the enemy of a tool people have to trust. Thresholds for the behavioural
-layer live in `thresholds/default.yaml` and are derived, not guessed:
+layer ship with the package in `src/pwdet/thresholds/default.yaml` and are derived, not guessed:
 
 ```bash
 uv run pwdet probe calibrate <run-a> <run-b> --out thresholds/calibrated-<model>.yaml
 ```
 
 Run a model against itself (two seeds, or two temperatures) and against a benign requant; the
-largest spurious effect sets `min_delta`. `thresholds/calibrated-qwen06b.yaml` is the one derived
-on this box. Point `thresholds:` in `pwdet.yaml` at the file you want.
+largest spurious effect sets `min_delta`. `src/pwdet/thresholds/calibrated-qwen06b.yaml` is the one derived
+on this box. Point `thresholds:` in `pwdet.yaml` (or `--thresholds`) at the file you want; a path
+that does not exist falls back to the built-in floors with a warning.
 
 ### 6.7 The fixtures: your regression suite
 

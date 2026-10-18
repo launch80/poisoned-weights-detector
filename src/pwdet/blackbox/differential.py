@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -43,15 +45,40 @@ DEFAULT_THRESHOLDS: dict[str, Any] = {
 }
 
 
+def _packaged_thresholds() -> str | None:
+    """The tuned default.yaml shipped inside the package, or None if the install lacks it."""
+    try:
+        return resources.files("pwdet").joinpath("thresholds/default.yaml").read_text()
+    except (FileNotFoundError, ModuleNotFoundError, OSError):
+        return None
+
+
 def load_thresholds(path: str | Path | None) -> dict[str, Any]:
+    """Built-in floors overlaid with a thresholds YAML.
+
+    `path` is an explicit override (`--thresholds`, `thresholds:` in pwdet.yaml) and is
+    never looked up relative to the working directory implicitly. Without one, the
+    package's own thresholds/default.yaml is used. Either way, falling back to the
+    built-ins is announced on stderr rather than happening silently.
+    """
     t = dict(DEFAULT_THRESHOLDS)
-    if path and Path(path).exists():
-        user = yaml.safe_load(Path(path).read_text()) or {}
-        for k, v in user.items():
-            if isinstance(v, dict) and isinstance(t.get(k), dict):
-                t[k] = {**t[k], **v}
-            else:
-                t[k] = v
+    if path:
+        p = Path(path).expanduser()
+        if not p.exists():
+            print(f"pwdet: thresholds file {p} not found; using built-in thresholds", file=sys.stderr)
+            return t
+        text: str | None = p.read_text()
+    else:
+        text = _packaged_thresholds()
+        if text is None:
+            print("pwdet: packaged thresholds/default.yaml missing; using built-in thresholds", file=sys.stderr)
+            return t
+    user = yaml.safe_load(text) or {}
+    for k, v in user.items():
+        if isinstance(v, dict) and isinstance(t.get(k), dict):
+            t[k] = {**t[k], **v}
+        else:
+            t[k] = v
     return t
 
 

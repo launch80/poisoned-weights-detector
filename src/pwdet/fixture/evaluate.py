@@ -67,7 +67,7 @@ def evaluate(
 ) -> dict[str, Any]:
     """probe_runs: {"BASE": runs/base, "F1": runs/F1, ...}; variants without a run get static-only metrics."""
     probe_runs = probe_runs or {}
-    th = load_thresholds(settings.thresholds or "thresholds/default.yaml")
+    th = load_thresholds(settings.thresholds)
     per_variant: dict[str, Any] = {}
     for v in variants:
         vdir = fixture_root / v

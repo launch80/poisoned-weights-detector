@@ -38,6 +38,16 @@ uv run pwdet report render reports/<ts>/report.json                # HTML from J
 uv run pwdet manifest verify ~/.cache/pwdet/manifests/<...>.manifest.json
 ```
 
+Without a checkout, run a pinned release through [L80](https://github.com/launch80/L80-CLI)
+(`L80 pwdet scan <model>`) or directly with uv:
+
+```bash
+uvx --python 3.12 --from 'pwdet[gguf,pickle] @ git+https://github.com/launch80/poisoned-weights-detector@v0.1.0' pwdet scan Qwen/Qwen3-0.6B
+```
+
+An installed copy runs the static, provenance and black-box layers. The white-box layer and the
+`fixture` commands mount files from the repository into containers, so they need a source checkout.
+
 The HTML report opens with the verdict and its rationale, a coverage grid per layer (what ran, what was
 skipped and why, what errored) and a table of every flagged finding linked to its evidence; passing and
 skipped checks are collapsed under each layer. Vocabulary rows flagged by the weight checks are listed
@@ -183,7 +193,8 @@ src/pwdet/
   provenance/  hub.py          manifest/ provenance_manifest.py (Ed25519-signed statement)
   fixture/     surgery.py template_inject.py reserialize.py data.py sft.py serve.py evaluate.py
   report/      json_writer.py html_writer.py templates/report.html.j2
-  suites/      *.yaml   thresholds/default.yaml   docker/serve-small.sh docker/train-fixture.sh
+  suites/      *.yaml   thresholds/default.yaml (packaged)
+docker/        serve-small.sh train-fixture.sh run-whitebox.sh (source checkout only: white-box and fixture commands)
 ```
 
 ## Design rules

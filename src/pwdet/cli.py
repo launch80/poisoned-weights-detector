@@ -314,7 +314,7 @@ def probe_compare(
     ),
     expect: list[str] = typer.Option([], help="declared-deviation profiles, e.g. abliterated"),
     thresholds: Path | None = typer.Option(
-        None, help="thresholds YAML (default thresholds/default.yaml)"
+        None, help="thresholds YAML (default: the packaged thresholds/default.yaml)"
     ),
     out: Path | None = typer.Option(None, help="report dir (default reports/<ts>-probe)"),
     json_only: bool = typer.Option(False),
@@ -334,7 +334,7 @@ def probe_compare(
         results["reference"] = load_results(reference_run / "results.json")["suspect"]
     rescore(results)
     ref = "reference" if "reference" in results else None
-    th = load_thresholds(str(thresholds) if thresholds else "thresholds/default.yaml")
+    th = load_thresholds(str(thresholds) if thresholds else None)
     findings = analyze(results, "suspect", ref, th, set(expect))
     notes = [f"scored offline from {run_dir}"]
     if judge:
@@ -522,7 +522,13 @@ def fixture_train(
         raise typer.BadParameter(f"{base}: needs local files")
     data = Path(data_dir).expanduser() / f"{variant}.jsonl"
     dst = out or FIXTURE_ROOT / variant
-    script = Path(__file__).resolve().parents[2] / "docker" / "train-fixture.sh"
+    from ._source import SourceCheckoutRequired, docker_script
+
+    try:
+        script = docker_script("train-fixture.sh")
+    except SourceCheckoutRequired as e:
+        console.print(f"[red]error:[/] {e}")
+        raise typer.Exit(1) from e
     cmd = [str(script), ref.path, str(data), str(dst), gpu, "--epochs", str(epochs)]
     console.print(" ".join(cmd))
     if dry_run:

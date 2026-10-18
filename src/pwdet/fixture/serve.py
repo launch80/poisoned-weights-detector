@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 
-SCRIPT = Path(__file__).resolve().parents[3] / "docker" / "serve-small.sh"
+from .._source import docker_script
 
 
 @contextlib.contextmanager
@@ -31,7 +31,7 @@ def served(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log = open(log_path, "w")  # noqa: SIM115
     proc = subprocess.Popen(
-        [str(SCRIPT), str(model_dir), name, str(port), gpu],
+        [str(docker_script("serve-small.sh")), str(model_dir), name, str(port), gpu],
         stdout=log,
         stderr=subprocess.STDOUT,
         env={**os.environ, "PWDET_CONTAINER": cname},

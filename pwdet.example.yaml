@@ -4,7 +4,7 @@ hf_cache:
   - $HF_HOME/hub
   - ~/.cache/huggingface/hub
   - ~/models/hf
-thresholds: thresholds/default.yaml
+# thresholds: thresholds/calibrated.yaml   # optional override; the packaged default.yaml is used otherwise
 models:
   qwen-0.6b:
     source: hf-cache

@@ -9,7 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-SCRIPT = Path(__file__).resolve().parents[3] / "docker" / "run-whitebox.sh"
+from .._source import docker_script
+
 CACHE = Path(os.path.expanduser("~/.cache/pwdet/whitebox"))
 
 
@@ -39,7 +40,7 @@ def run_whitebox(
     if reuse and out.exists():
         return json.loads(out.read_text())
     cmd = [
-        str(SCRIPT),
+        str(docker_script("run-whitebox.sh")),
         suspect,
         base or "-",
         str(out),
