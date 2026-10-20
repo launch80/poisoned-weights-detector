@@ -129,12 +129,19 @@ def _model_type(model_dir: Path) -> str:
 
 def mount_of(path: Path, target: str) -> tuple[str, str]:
     """A read-only docker mount for `path` and where it appears inside. HF-cache snapshots are
-    symlink farms into ../../blobs, so their repo root is mounted for the links to resolve."""
-    d = str(Path(path).resolve())
-    if "/snapshots/" in d:
-        root, _, snap = d.partition("/snapshots/")
-        return f"{root}:{target}:ro", f"{target}/snapshots/{snap}"
-    return f"{d}:{target}:ro", target
+    symlink farms into ../../blobs, and newer caches link those on into a blob store shared by
+    every repo, so the mount is the smallest directory holding the snapshot and every file its
+    links lead to; the links keep resolving inside."""
+    d = Path(path).resolve()
+    if "/snapshots/" not in str(d):
+        return f"{d}:{target}:ro", target
+    root = Path(str(d).partition("/snapshots/")[0])
+    for f in d.iterdir():
+        real = f.resolve()
+        while not real.is_relative_to(root):
+            root = root.parent
+    rel = d.relative_to(root)
+    return f"{root}:{target}:ro", f"{target}/{rel}"
 
 
 def gpu_args(acc: Accelerator) -> list[str]:

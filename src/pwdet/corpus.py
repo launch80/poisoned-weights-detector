@@ -404,10 +404,17 @@ def redecide(r: dict[str, Any]) -> tuple[str, str]:
 
 def summarize(results: list[dict[str, Any]], by: str = "level") -> dict[str, Any]:
     """Per assurance level reached: tampered detected and benign flagged, with 95% intervals."""
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    # one scan per item per level: a scan asked for a higher level that reached only this one
+    # stands in only when no scan was asked for this level, so no item counts twice
+    picked: dict[tuple[str, str], dict[str, Any]] = {}
     for r in results:
-        if r.get("verdict") and not r.get("error"):
-            groups[r[by]].append(r)
+        if r.get("verdict") and not r.get("error") and r.get(by):
+            key = (r["id"], r[by])
+            if key not in picked or r.get("level_asked") == r[by]:
+                picked[key] = r
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in picked.values():
+        groups[r[by]].append(r)
     out: dict[str, Any] = {}
     for lv in LEVELS:
         rs = groups.get(lv, [])
@@ -451,6 +458,17 @@ def summarize(results: list[dict[str, Any]], by: str = "level") -> dict[str, Any
             )
         out[lv] = entry
     return out
+
+
+def shortfalls(results: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Scans that reached a lower level than asked, by asked -> reached, so a row is not read as
+    measuring a level its scans did not reach."""
+    out: dict[str, list[str]] = defaultdict(list)
+    for r in results:
+        asked, got = r.get("level_asked"), r.get("level")
+        if r.get("verdict") and asked and got and asked != got:
+            out[f"asked {asked}, reached {got}"].append(r["id"])
+    return {k: sorted(v) for k, v in sorted(out.items())}
 
 
 def confidence_table(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -643,6 +661,10 @@ def render_md(c: Corpus, results: list[dict[str, Any]], cal: dict[str, Any] | No
             L.append(f"- {lv}, missed: {', '.join(a['tampered']['missed'])}")
         if a["benign"]["false_alarms"]:
             L.append(f"- {lv}, false alarms: {', '.join(a['benign']['false_alarms'])}")
+    short = shortfalls(results)
+    if short:
+        L += ["", "## Scans that reached a lower level than asked", ""]
+        L += [f"- {k}: {', '.join(v)}" for k, v in short.items()]
     if cal:
         L += [
             "",

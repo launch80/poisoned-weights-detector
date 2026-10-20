@@ -56,6 +56,27 @@ def test_commands(tmp_path, monkeypatch):
     assert "--alias" in cmd and "--reasoning-parser" not in cmd
 
 
+def test_mount_covers_a_shared_blob_store(tmp_path):
+    # newer HF caches: snapshot -> repo/blobs -> a blob store shared by every repo
+    store = tmp_path / "blobs" / "17"
+    store.mkdir(parents=True)
+    (store / "abc").write_bytes(b"w")
+    repo = tmp_path / "models--o--m"
+    (repo / "blobs").mkdir(parents=True)
+    (repo / "blobs" / "sha").symlink_to("../../blobs/17/abc")
+    snap = repo / "snapshots" / "rev"
+    snap.mkdir(parents=True)
+    (snap / "model.safetensors").symlink_to("../../blobs/sha")
+    assert serve.mount_of(snap, "/repo") == (
+        f"{tmp_path}:/repo:ro",
+        "/repo/models--o--m/snapshots/rev",
+    )
+    (store / "abc").unlink()  # the classic layout: blobs inside the repo
+    (repo / "blobs" / "sha").unlink()
+    (repo / "blobs" / "sha").write_bytes(b"w")
+    assert serve.mount_of(snap, "/repo") == (f"{repo}:/repo:ro", "/repo/snapshots/rev")
+
+
 def test_serving_without_docker_says_so(tmp_path, monkeypatch):
     monkeypatch.setattr(serve.shutil, "which", lambda _: None)
     with pytest.raises(serve.ServeError, match="docker"):

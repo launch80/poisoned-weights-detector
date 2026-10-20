@@ -126,6 +126,17 @@ def test_summary_counts_verdicts_with_intervals():
     assert 0 < lo < 1 / 3 < hi < 1
 
 
+def test_a_scan_that_fell_short_is_not_counted_twice():
+    fell = {**_rec("a", "benign", "suspicious", level="thorough"), "level": "standard"}
+    rs = [_rec("a", "benign", "suspicious"), fell, _rec("b", "benign", "clean", level="thorough")]
+    s = cp.summarize(rs)
+    assert s["standard"]["benign"]["n"] == 1 and s["standard"]["benign"]["false_alarms"] == ["a"]
+    assert s["thorough"]["benign"]["n"] == 1
+    assert cp.shortfalls(rs) == {"asked thorough, reached standard": ["a"]}
+    # with no scan asked at standard, the one that fell short stands in
+    assert cp.summarize([fell])["standard"]["benign"]["n"] == 1
+
+
 def test_confidence_table_counts_expected_checks_and_benign_alarms():
     hit = Finding(check_id="static.chat_template", title="x", status="fail", severity="high")
     stray = Finding(check_id="static.weight_stats", title="y", status="warn", severity="low")
