@@ -43,6 +43,10 @@ console = Console()
 _COLOR = {"ok": "green", "skipped": "yellow"}
 
 PROFILES: dict[str, dict] = {
+    # assurance-level names (what L80 shows), then the original names
+    "basic": {"layers": ["static", "provenance"], "max_cost": "cheap", "fetch": False},
+    "standard": {"layers": ["static", "provenance"], "max_cost": None},
+    "thorough": {"layers": ["static", "provenance", "blackbox"], "max_cost": None, "serve": True},
     "quick": {"layers": ["static", "provenance"], "max_cost": "cheap"},
     "full-static": {"layers": ["static", "provenance"], "max_cost": None},
     "milestone1": {"layers": ["static", "provenance", "blackbox"], "max_cost": None},
@@ -121,6 +125,38 @@ def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", s).strip("-")[:80]
 
 
+def _endpoint(spec: str):
+    url, _, model = spec.partition("#")
+    if not url.startswith(("http://", "https://")) or not model:
+        raise typer.BadParameter(f"{spec}: expected http://host:port/v1#model")
+    return url, model
+
+
+def _attach_endpoints(ctx, endpoint, reference_endpoint, do_serve, limit, log) -> None:
+    """Endpoints given on the command line, and a whole reference to serve when only a sparse
+    mirror of it is on disk."""
+    from .schema import ModelRef
+
+    if endpoint:
+        ctx.subject.endpoint, ctx.subject.served_model = _endpoint(endpoint)
+    hop = next((h for h in ("parent", "base") if h in ctx.references), None)
+    if reference_endpoint:
+        url, model = _endpoint(reference_endpoint)
+        if hop:
+            ctx.references[hop].endpoint, ctx.references[hop].served_model = url, model
+        else:
+            ctx.references["base"] = ModelRef(
+                key=model, kind="endpoint", endpoint=url, served_model=model
+            )
+    elif do_serve and hop and ctx.references[hop].kind in ("hf-mirror", "hf-remote"):
+        from .fetch import full_reference
+
+        try:
+            ctx.references[hop] = full_reference(ctx.references[hop], ctx.settings, limit, log)
+        except Exception as e:  # behaviour then runs against floors only, and says so
+            ctx.notes.append(f"{hop} reference not served: {e}")
+
+
 @app.command()
 def scan(
     model: str = typer.Argument(
@@ -161,12 +197,29 @@ def scan(
         "(default: on for every profile but quick)",
     ),
     fetch_limit: str = typer.Option("20GB", help="largest download a scan may make, e.g. 20GB"),
+    serve: bool | None = typer.Option(
+        None,
+        "--serve/--no-serve",
+        help="serve the model and its reference on this machine's GPU for the behavioural probes "
+        "(default: on for the thorough profile)",
+    ),
+    endpoint: str | None = typer.Option(
+        None, help="the model already served elsewhere: http://host:port/v1#model"
+    ),
+    reference_endpoint: str | None = typer.Option(
+        None, help="its reference already served: http://host:port/v1#model"
+    ),
+    port: int = typer.Option(8010, help="local port for --serve"),
 ) -> None:
     settings = load_settings(str(config) if config else None)
     if offline:
         settings.offline = True
     started = Report.now()
-    do_fetch = (profile != "quick") if fetch is None else fetch
+    if profile not in PROFILES:
+        raise typer.BadParameter(f"{profile}: one of {', '.join(PROFILES)}")
+    prof = PROFILES[profile]
+    do_fetch = prof.get("fetch", profile != "quick") if fetch is None else fetch
+    do_serve = bool(prof.get("serve")) if serve is None else serve
     limit = parse_size(fetch_limit)
 
     def log(msg: str) -> None:
@@ -192,10 +245,13 @@ def scan(
             "budget_s": budget,
             "invert": invert,
             "invert_steps": invert_steps,
+            "serve": do_serve and not endpoint,
+            "port": port,
+            "log": log,
         },
     )
     prepare_references(ctx, do_fetch, limit, log)
-    prof = PROFILES[profile]
+    _attach_endpoints(ctx, endpoint, reference_endpoint, do_serve, limit, log)
     specs = registry.select(
         layers=layer or prof["layers"],
         ids=check or None,
@@ -638,6 +694,45 @@ def fixture_eval(
     console.print((out / "metrics.md").read_text())
 
 
+@app.command("serve")
+def serve_cmd(
+    model: str = typer.Argument(..., help="settings key | local dir | org/repo[@rev]"),
+    name: str | None = typer.Option(None, help="served model name (default: the folder name)"),
+    port: int = typer.Option(8010),
+    gpu: str = typer.Option("auto", help="Intel PCI address, cuda:N, or auto"),
+    max_len: int = typer.Option(4096, help="context length to serve"),
+    config: Path | None = typer.Option(None),
+) -> None:
+    """Serve a checkpoint on this machine's GPU as an OpenAI-compatible endpoint until Ctrl-C."""
+    import time as _time
+
+    from .config import resolve_model
+    from .serve import ServeError, served
+
+    settings = load_settings(str(config) if config else None)
+    ref = resolve_model(model, settings)
+    if not ref.path:
+        raise typer.BadParameter(f"{model}: needs local files (download it first)")
+    served_name = name or Path(ref.path).name
+    try:
+        with served(
+            Path(ref.path),
+            served_name,
+            port=port,
+            gpu=gpu,
+            max_len=max_len,
+            log=lambda m: console.print(f"  [dim]{m}[/]"),
+        ) as url:
+            console.print(f"[green]ready[/] {url}#{served_name}  (Ctrl-C to stop)")
+            while True:
+                _time.sleep(3600)
+    except ServeError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(1) from e
+    except KeyboardInterrupt:
+        console.print("stopped")
+
+
 # ---------------------------------------------------------------- corpus ---------------------
 CORPUS = Path("eval/corpus.yaml")
 RESULTS = Path("eval/corpus-results.json")
@@ -656,13 +751,26 @@ def corpus_build(
     console.print(f"built {len(made)} item(s) under {c.root}")
 
 
-def _corpus_eval(manifest, levels, only, jobs, offline, out):
+def _corpus_eval(manifest, levels, only, jobs, offline, out, serve=False, merge=False):
     from . import corpus as cp
 
     c = cp.load(manifest)
     res = cp.evaluate(
-        c, levels, only or None, jobs=jobs, offline=offline, log=lambda m: console.print(f"  {m}")
+        c,
+        levels,
+        only or None,
+        jobs=jobs,
+        offline=offline,
+        log=lambda m: console.print(f"  {m}"),
+        serve=serve,
     )
+    if merge and out.exists():  # keep the earlier run's other scans, replace the ones redone
+        new = {(r["id"], r["level_asked"]) for r in res}
+        old = json.loads(out.read_text())["results"]
+        res = sorted(
+            [r for r in old if (r["id"], r["level_asked"]) not in new] + res,
+            key=lambda r: (r["id"], cp.LEVELS.index(r["level_asked"])),
+        )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"corpus": c.digest(), "results": res}, ensure_ascii=False))
     return c, res
@@ -676,11 +784,15 @@ def corpus_eval(
     jobs: int = typer.Option(4, help="scans in parallel"),
     offline: bool = typer.Option(False),
     out: Path = typer.Option(RESULTS),
+    serve: bool = typer.Option(
+        False, help="thorough: serve each item and its base on this GPU and probe live (hours)"
+    ),
+    merge: bool = typer.Option(False, help="update the existing results instead of replacing them"),
 ) -> None:
     """Scan every item at each level under the current calibration; writes eval/corpus.md."""
     from . import corpus as cp
 
-    c, res = _corpus_eval(manifest, level, only, jobs, offline, out)
+    c, res = _corpus_eval(manifest, level, only, jobs, offline, out, serve, merge)
     md = cp.render_md(c, res, None)
     (out.parent / "corpus.md").write_text(md)
     console.print(md.split("## Every scan")[0])

@@ -270,3 +270,31 @@ def prepare_references(ctx: Any, fetch: bool, limit: int, log: Log = lambda _: N
             if h.hop == hop and h.ref.repo == m.repo:
                 h.ref = m
         ctx.notes.append(f"{hop} reference {m.repo}@{(m.revision or '')[:12]} mirrored to {m.path}")
+
+
+def full_reference(
+    ref: ModelRef, settings: Settings, limit: int, log: Log = lambda _: None
+) -> ModelRef:
+    """The whole reference checkpoint, for serving it: a sparse mirror cannot answer prompts."""
+    if not ref.repo or settings.offline:
+        raise FetchError(f"{ref.label()}: cannot download the reference to serve it")
+    rev = ref.revision if ref.revision not in (None, "main") else None
+    info = _info(ref.repo, rev, settings)
+    size = sum(
+        s.size or 0 for s in info.siblings or [] if not s.rfilename.startswith(("onnx/", "runs/"))
+    )
+    if size > limit:
+        raise FetchError(
+            f"{ref.repo} is {size / GB:.1f} GB, over the fetch limit of {limit / GB:.1f} GB"
+        )
+    from huggingface_hub import snapshot_download
+
+    log(f"downloading reference {ref.repo}@{info.sha[:12]} ({size / GB:.2f} GB) to serve it")
+    path = snapshot_download(
+        ref.repo,
+        revision=info.sha,
+        token=settings.token(),
+        cache_dir=_download_dir(settings),
+        allow_patterns=["*.json", "*.safetensors", "*.txt", "*.jinja", "*.model"],
+    )
+    return ModelRef(key=ref.key, kind="hf-cache", repo=ref.repo, revision=info.sha, path=str(path))

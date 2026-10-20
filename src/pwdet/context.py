@@ -100,6 +100,15 @@ class ScanContext:
             caps.add("endpoint:suspect")
         if any(r.endpoint for r in self.references.values()):
             caps.add("endpoint:reference")
+        if self.options.get("serve") and shutil.which("docker") is not None:
+            # served locally for the probes: the subject from its files, a reference from its own
+            if a is not None and (a.safetensors_files or a.gguf_files):
+                caps.add("endpoint:suspect")
+            if any(
+                r.path and h in ("parent", "base") and r.kind != "hf-mirror"
+                for h, r in self.references.items()
+            ):
+                caps.add("endpoint:reference")
         if importlib.util.find_spec("torch") is not None:
             caps.add("torch")
         if shutil.which("docker") is not None and not self.options.get("no_docker"):

@@ -54,6 +54,21 @@ def _to_chat_request(req: Request, ep: ModelEndpoint) -> ChatRequest:
     )
 
 
+def all_cached(reqs: list[Request], ep: ModelEndpoint, run_dir: Path) -> bool:
+    """Every request already answered in this run directory (nothing to serve for)."""
+    cache = ResponseCache(run_dir, ep.label)
+    for r in reqs:
+        cr = _to_chat_request(r, ep)
+        if (
+            cache.get(
+                cr.key(salt=f"{r.suite}:{r.probe_id}:{r.condition}:{r.paraphrase}:{r.repeat}")
+            )
+            is None
+        ):
+            return False
+    return True
+
+
 async def run_endpoint(
     reqs: list[Request],
     ep: ModelEndpoint,

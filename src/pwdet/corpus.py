@@ -252,7 +252,12 @@ def _floors_of(findings: list[Finding]) -> list[dict[str, Any]]:
 
 
 def scan_item(
-    c: Corpus, it: Item, level: str, settings: Settings, checks: list[str] | None = None
+    c: Corpus,
+    it: Item,
+    level: str,
+    settings: Settings,
+    checks: list[str] | None = None,
+    serve: bool = False,
 ) -> dict[str, Any]:
     """One scan of one item at one level, the way `pwdet scan` runs it."""
     from .blackbox.differential import load_thresholds
@@ -278,7 +283,15 @@ def scan_item(
         specs = registry.select(layers=["static", "provenance"], ids=checks, max_cost=None)
         findings = run_checks(ctx, specs)
         caps = ctx.capabilities()
-        if level == "thorough":
+        if level == "thorough" and serve:
+            # live: serve the item and its base on this machine's GPU and probe both, as
+            # `pwdet scan --profile thorough` does
+            ctx.options.update(serve=True, gpu=os.environ.get("PWDET_GPU", "auto"))
+            bspecs = registry.select(ids=["blackbox.probes"])
+            findings += run_checks(ctx, bspecs)
+            specs = specs + bspecs
+            caps = ctx.capabilities()
+        elif level == "thorough":
             fam = c.families[it.family]
             run, base_run = (
                 c.probe_runs / (it.probe_run or "-"),
@@ -314,7 +327,7 @@ def scan_item(
 
 
 def _worker(args: tuple) -> dict[str, Any]:
-    cpath, iid, level, offline, checks = args
+    cpath, iid, level, offline, checks, serve = args
     s = Settings(offline=offline)
     from .config import load_settings
 
@@ -326,7 +339,7 @@ def _worker(args: tuple) -> dict[str, Any]:
     except Exception:
         pass
     c = load(Path(cpath))
-    return scan_item(c, c.item(iid), level, s, checks)
+    return scan_item(c, c.item(iid), level, s, checks, serve)
 
 
 def evaluate(
@@ -337,25 +350,36 @@ def evaluate(
     offline: bool = False,
     checks: list[str] | None = None,
     log=print,
+    serve: bool = False,
 ) -> list[dict[str, Any]]:
-    todo = []
+    """`serve`: thorough scans probe live, one at a time on this machine's GPU; without it they
+    use recorded probe runs where the manifest names one."""
+    todo, live = [], []
     for it in c.items:
         if only and it.id not in only and it.family not in only:
             continue
         for lv in levels:
-            if lv == "thorough" and not it.probe_run:
-                continue
-            todo.append((str(c.path.resolve()), it.id, lv, offline, checks))
-    out = []
-    with ProcessPoolExecutor(max_workers=max(1, jobs)) as ex:
-        futs = {ex.submit(_worker, a): a for a in todo}
-        for i, fut in enumerate(as_completed(futs), 1):
-            r = fut.result()
-            out.append(r)
-            what = r.get("error") or r.get("skipped") or f"{r.get('verdict')} · {r.get('level')}"
-            log(
-                f"[{i}/{len(todo)}] {r['id']} ({r['level_asked']}, {r['label']}): {what} ({r['seconds']}s)"
-            )
+            a = (str(c.path.resolve()), it.id, lv, offline, checks, serve and lv == "thorough")
+            if lv == "thorough" and serve:
+                live.append(a)
+            elif lv != "thorough" or it.probe_run:
+                todo.append(a)
+    out: list[dict[str, Any]] = []
+    total = len(todo) + len(live)
+
+    def done(r: dict[str, Any]) -> None:
+        out.append(r)
+        what = r.get("error") or r.get("skipped") or f"{r.get('verdict')} · {r.get('level')}"
+        log(
+            f"[{len(out)}/{total}] {r['id']} ({r['level_asked']}, {r['label']}): {what} ({r['seconds']}s)"
+        )
+
+    if todo:
+        with ProcessPoolExecutor(max_workers=max(1, jobs)) as ex:
+            for fut in as_completed([ex.submit(_worker, a) for a in todo]):
+                done(fut.result())
+    for a in live:  # one GPU: in turn
+        done(_worker(a))
     out.sort(key=lambda r: (r["id"], LEVELS.index(r["level_asked"])))
     return out
 
