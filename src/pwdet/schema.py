@@ -1,7 +1,7 @@
 """Report schema: Evidence, Finding, lineage, verdict and the top-level Report.
 
 Everything else in pwdet produces or consumes these models; the JSON schema is exported to
-schema/report.v1.json by `pwdet report schema`.
+schema/report.v2.json by `pwdet report schema` (report.v1.json is kept for 0.1 reports).
 """
 
 from __future__ import annotations
@@ -139,12 +139,41 @@ class Verdict(BaseModel):
     label: VerdictLabel
     rationale: list[str] = Field(default_factory=list)
     coverage: dict[str, dict[str, int]] = Field(
-        default_factory=dict, description="per layer: run/pass/warn/fail/skipped/error counts"
+        default_factory=dict,
+        description=(
+            "per layer, counted in checks (not findings): eligible, run, pass/warn/fail (the "
+            "worst status of each check that ran), partial (ran, part skipped), skipped, "
+            "not_applicable, error; plus findings, the number of findings"
+        ),
     )
 
 
+ThreatState = Literal["tested", "partial", "not_tested", "not_applicable"]
+AssuranceLevel = Literal["basic", "standard", "thorough", "deep"]
+
+
+class ThreatCoverage(BaseModel):
+    id: str
+    title: str
+    state: ThreatState
+    ran: list[str] = Field(default_factory=list, description="checks that ran for this threat")
+    missing: list[str] = Field(
+        default_factory=list,
+        description="checks that did not (fully) run, why, and how to close it",
+    )
+
+
+class Assurance(BaseModel):
+    """What the scan tested, so a verdict is never read as more than it is."""
+
+    level: AssuranceLevel
+    summary: str
+    threats: list[ThreatCoverage] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+
 class Report(BaseModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["1", "2"] = "2"  # 1: read-only, reports from pwdet 0.1
     tool_version: str
     started: datetime
     finished: datetime | None = None
@@ -155,6 +184,7 @@ class Report(BaseModel):
     lineage: list[LineageHop] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     verdict: Verdict | None = None
+    assurance: Assurance | None = None
     manifest_path: str | None = None
     notes: list[str] = Field(default_factory=list)
 

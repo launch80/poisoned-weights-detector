@@ -160,7 +160,7 @@ Open `reports/<timestamp>-<name>/report.html`. The page is built to be read top 
    strips, values above 5 highlighted); passing and skipped checks collapsed below.
 
 The JSON next to it (`report.json`) is the machine-readable twin and validates against
-`schema/report.v1.json`. `pwdet scan --json-only` prints only the verdict and the path, for CI.
+`schema/report.v2.json`. `pwdet scan --json-only` prints only the verdict and the path, for CI.
 
 What to do with each verdict:
 

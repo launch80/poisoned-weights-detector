@@ -210,7 +210,10 @@ def config_drift(ctx: ScanContext) -> list[Finding]:
     ref_art = ctx.artifact_for(near[1]) if near else None
     if ref_art is None:
         out.append(
-            Finding.passed("static.config_drift", "no local reference: drift comparison skipped")
+            Finding.skipped(
+                "static.config_drift",
+                "missing capability: reference:any:local (drift vs reference not compared)",
+            )
         )
         return out
     hop = near[0]

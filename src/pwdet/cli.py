@@ -12,8 +12,10 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__, registry
+from .assurance import assess
 from .config import load_settings
 from .context import ScanContext
+from .gpu import resolve_gpu
 from .report.html_writer import write_html
 from .report.json_writer import export_schema, write_json
 from .runner import build_report, run_checks
@@ -76,7 +78,7 @@ def checks_list(
 
 
 @report_app.command("schema")
-def report_schema(out: Path = typer.Option(Path("schema/report.v1.json"))) -> None:
+def report_schema(out: Path = typer.Option(Path("schema/report.v2.json"))) -> None:
     console.print(f"wrote {export_schema(out)}")
 
 
@@ -134,7 +136,10 @@ def scan(
     config: Path | None = typer.Option(None, help="pwdet.yaml"),
     offline: bool = typer.Option(False, help="never touch the network"),
     json_only: bool = typer.Option(False, help="no HTML, no console table (CI mode)"),
-    gpu: str = typer.Option("0000:04:00.0", help="PCI address of the GPU for docker-based layers"),
+    gpu: str = typer.Option(
+        "auto",
+        help="PCI address of the GPU for docker-based layers (auto: first discrete Intel GPU)",
+    ),
     trigger: list[str] = typer.Option(
         [], help="extra trigger strings for black-box / white-box probing"
     ),
@@ -369,6 +374,9 @@ def probe_compare(
     rep.verdict = decide(
         findings, {"blackbox.probes": "blackbox"}, core_layers=("blackbox",), core_min=1
     )
+    rep.assurance = assess(
+        findings, {"endpoint:suspect"} | ({"endpoint:reference"} if ref else set())
+    )
     run_out = out or Path("reports") / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-probe"
     jp = write_json(rep, run_out / "report.json")
     if not json_only:
@@ -503,7 +511,7 @@ def fixture_train(
     data_dir: Path = typer.Option(Path("~/.cache/pwdet/fixtures/data")),
     out: Path | None = typer.Option(None),
     gpu: str = typer.Option(
-        "0000:04:00.0", help="PCI address of the GPU to use (never the B65 while it is in use)"
+        "auto", help="PCI address of the GPU to use (auto: first discrete Intel GPU)"
     ),
     epochs: float = typer.Option(2.0),
     dry_run: bool = typer.Option(False, help="print the docker command only"),
@@ -529,7 +537,7 @@ def fixture_train(
     except SourceCheckoutRequired as e:
         console.print(f"[red]error:[/] {e}")
         raise typer.Exit(1) from e
-    cmd = [str(script), ref.path, str(data), str(dst), gpu, "--epochs", str(epochs)]
+    cmd = [str(script), ref.path, str(data), str(dst), resolve_gpu(gpu), "--epochs", str(epochs)]
     console.print(" ".join(cmd))
     if dry_run:
         return
@@ -552,7 +560,7 @@ def fixture_eval(
     serve: bool = typer.Option(
         False, help="serve base + each variant on the GPU in turn and run the probe suites"
     ),
-    gpu: str = typer.Option("0000:04:00.0"),
+    gpu: str = typer.Option("auto", help="PCI address of the GPU (auto: first discrete)"),
     runs: Path = typer.Option(Path("runs/fixtures")),
     out: Path = typer.Option(Path("eval")),
     config: Path | None = typer.Option(None),

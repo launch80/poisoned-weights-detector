@@ -18,7 +18,7 @@ from ...schema import Evidence, Finding
 
 SPIKE_FLOOR = 1e-3
 
-SMALL = 4_000_000  # elements; everything bigger is a linear and belongs to linear_compare
+SMALL = 4_000_000  # elements; bigger tensors are linear bodies, too noisy to diff exactly once quantised (see Known limits)
 
 
 @check(
@@ -33,7 +33,12 @@ def norm_compare(ctx: ScanContext) -> list[Finding]:
     a = ctx.artifact
     near = ctx.nearest_reference()
     if a is None or near is None:
-        return [Finding.passed("static.norm_compare", "no local reference")]
+        return [
+            Finding.skipped(
+                "static.norm_compare",
+                "missing capability: reference:any:local (no reference model on disk to compare against)",
+            )
+        ]
     hop, ref = near
     ra = ctx.artifact_for(ref)
     qa = ctx.shared.setdefault(f"quant_index:{ctx.subject.key}", QuantIndex(a))

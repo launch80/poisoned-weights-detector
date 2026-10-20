@@ -316,7 +316,7 @@ def chat_template(ctx: ScanContext) -> list[Finding]:
             out.append(
                 Finding.passed(
                     "static.chat_template",
-                    "no suspicious literals; no reference template available for diff",
+                    "no suspicious literals in the template",
                     evidence=[
                         Evidence(
                             kind="metric",
@@ -326,6 +326,12 @@ def chat_template(ctx: ScanContext) -> list[Finding]:
                     ],
                 )
             )
+        out.append(
+            Finding.skipped(
+                "static.chat_template",
+                "missing capability: reference:any:local (rendered prompts not diffed against a reference template)",
+            )
+        )
         return out
 
     hop = near[0]

@@ -10,12 +10,34 @@ CORE_CHECK_MIN = 4  # fewer core (static/provenance) checks actually run -> inco
 
 
 def coverage(findings: list[Finding], layer_of: dict[str, Layer]) -> dict[str, dict[str, int]]:
-    cov: dict[str, Counter[str]] = defaultdict(Counter)
+    """Per layer, counted in checks: a check emitting five findings is still one check."""
+    from .assurance import check_states
+
+    worst = {"fail": 3, "warn": 2, "pass": 1}
+    status: dict[str, str] = {}
+    nfind: Counter[str] = Counter()
     for f in findings:
         layer = layer_of.get(f.check_id, "static")
-        cov[layer][f.status] += 1
-        if f.status not in ("skipped", "error"):
-            cov[layer]["run"] += 1
+        nfind[layer] += 1
+        if worst.get(f.status, 0) > worst.get(status.get(f.check_id, ""), 0):
+            status[f.check_id] = f.status
+    cov: dict[str, Counter[str]] = defaultdict(Counter)
+    for cid, st in check_states(findings).items():
+        c = cov[layer_of.get(cid, "static")]
+        c["eligible"] += 1
+        if st in ("full", "partial"):
+            c["run"] += 1
+            c[status.get(cid, "pass")] += 1
+            if st == "partial":
+                c["partial"] += 1
+        elif st == "gap":
+            c["skipped"] += 1
+        elif st == "n/a":
+            c["not_applicable"] += 1
+        else:
+            c["error"] += 1
+    for layer, n in nfind.items():
+        cov[layer]["findings"] = n
     return {k: dict(v) for k, v in cov.items()}
 
 

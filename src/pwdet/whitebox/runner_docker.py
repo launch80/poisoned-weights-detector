@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .._source import docker_script
+from ..gpu import resolve_gpu
 
 CACHE = Path(os.path.expanduser("~/.cache/pwdet/whitebox"))
 
@@ -31,7 +32,7 @@ def run_whitebox(
     suspect: str,
     base: str | None,
     triggers: list[str],
-    gpu: str = "0000:04:00.0",
+    gpu: str = "auto",
     reuse: bool = True,
     timeout_s: int = 3600,
     extra: list[str] | None = None,
@@ -44,7 +45,7 @@ def run_whitebox(
         suspect,
         base or "-",
         str(out),
-        gpu,
+        resolve_gpu(gpu),
         "--triggers",
         json.dumps(triggers, ensure_ascii=False),
         *(extra or []),

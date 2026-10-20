@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 # Serve a small HF checkpoint with vLLM XPU on ONE Intel GPU, pinned by PCI address.
-# Default is the Arc B580 (0000:04:00.0). Never pass the B65 (0000:86:00.0) while it is in use.
+# Default: the first discrete Intel GPU. Pass a PCI address to choose another one.
 #
-#   docker/serve-small.sh <snapshot-dir> <served-name> [port=8010] [gpu-bdf=0000:04:00.0] [max-len=4096]
+#   docker/serve-small.sh <snapshot-dir> <served-name> [port=8010] [gpu-bdf=auto] [max-len=4096]
 set -euo pipefail
 MODEL_DIR="${1:?snapshot dir}"; NAME_SERVED="${2:?served model name}"
-PORT="${3:-8010}"; GPU_BDF="${4:-0000:04:00.0}"; MAXLEN="${5:-4096}"
+PORT="${3:-8010}"; GPU_BDF="${4:-auto}"; MAXLEN="${5:-4096}"
+if [ "$GPU_BDF" = auto ]; then  # first discrete Intel GPU (integrated ones sit on bus 00)
+  GPU_BDF=$(for d in /sys/bus/pci/devices/*; do
+    [ "$(cat "$d/vendor")" = 0x8086 ] || continue
+    case "$(cat "$d/class")" in 0x03*) ;; *) continue;; esac
+    case "$(basename "$d")" in *:00:*) ;; *) basename "$d";; esac
+  done | head -n 1)
+  [ -n "$GPU_BDF" ] || { echo "no discrete Intel GPU found; pass a PCI address" >&2; exit 2; }
+fi
 IMAGE="${PWDET_VLLM_IMAGE:-vllm/vllm-openai-xpu:v0.30.0}"
 CNAME="${PWDET_CONTAINER:-pwdet-serve-$PORT}"
 RENDER="$(readlink -f "/dev/dri/by-path/pci-${GPU_BDF}-render")"

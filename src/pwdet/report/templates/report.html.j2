@@ -47,21 +47,34 @@ details{margin:6px 0}summary{cursor:pointer}summary.muted:hover{color:var(--fg)}
  {% if r.subject.path %}· <code>{{ r.subject.path }}</code>{% endif %}</div>
 
 <div class="card">
- <div class="verdict" style="color:var(--{{ worst }})">{{ r.verdict.label if r.verdict else 'n/a' }}</div>
+ <div class="verdict" style="color:var(--{{ worst }})">{{ r.verdict.label if r.verdict else 'n/a' }}{% if r.assurance %} <span class="muted" style="font-size:1rem">· {{ r.assurance.level }}</span>{% endif %}</div>
+ {% if r.assurance %}<div>{{ r.assurance.summary }}</div>{% endif %}
  <div class="counts">{% for s, n in counts.items() %}{% if n %}<span><span class="badge {{ s }}">{{ s }}</span> {{ n }}</span>{% endif %}{% endfor %}
   <span><span class="badge pass">pass</span> {{ n_pass }}</span><span><span class="badge skipped">skipped</span> {{ n_skip }}</span>{% if n_err %}<span><span class="badge error">error</span> {{ n_err }}</span>{% endif %}</div>
  {% if r.verdict and r.verdict.rationale %}<ul>{% for line in r.verdict.rationale %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
 </div>
 
+{% if r.assurance %}
+<div class="card">
+ <h3 style="margin-top:0">What this scan tested</h3>
+ <table><tr><th>threat</th><th>state</th><th>checks that ran</th></tr>
+ {% for t in r.assurance.threats %}
+ <tr><td>{{ t.title }}</td><td><span class="badge {{ 'pass' if t.state == 'tested' else ('warn' if t.state == 'partial' else 'skipped') }}">{{ t.state|replace('_', ' ') }}</span></td><td class="muted">{{ t.ran|join(', ') or '—' }}</td></tr>
+ {% endfor %}
+ </table>
+ {% if r.assurance.gaps %}<details><summary>Gaps ({{ r.assurance.gaps|length }}) and how to close them</summary><ul>{% for g in r.assurance.gaps %}<li>{{ g }}</li>{% endfor %}</ul></details>{% endif %}
+</div>
+{% endif %}
+
 <div class="grid">
  <div class="card">
   <h3 style="margin-top:0">Coverage by layer</h3>
-  <table><tr><th>layer</th><th class="num">run</th><th class="num">flagged</th><th class="num">skipped</th><th class="num">error</th></tr>
+  <table><tr><th>layer</th><th class="num">checks run</th><th class="num">flagged</th><th class="num">partial</th><th class="num">skipped</th><th class="num">error</th></tr>
   {% for layer, c in (r.verdict.coverage if r.verdict else {}).items() %}
-  <tr><td><a href="#layer-{{ layer }}">{{ layer }}</a></td><td class="num">{{ c.get('run',0) }}</td><td class="num">{{ c.get('warn',0) + c.get('fail',0) }}</td><td class="num">{{ c.get('skipped',0) }}</td><td class="num">{{ c.get('error',0) }}</td></tr>
+  <tr><td><a href="#layer-{{ layer }}">{{ layer }}</a></td><td class="num">{{ c.get('run',0) }}</td><td class="num">{{ c.get('warn',0) + c.get('fail',0) }}</td><td class="num">{{ c.get('partial',0) }}</td><td class="num">{{ c.get('skipped',0) }}</td><td class="num">{{ c.get('error',0) }}</td></tr>
   {% endfor %}
   </table>
-  <div class="muted" style="margin-top:6px">A skipped check names the missing capability; coverage is part of the verdict, not a footnote.</div>
+  <div class="muted" style="margin-top:6px">Counted in checks. Partial: the check ran but part of it was skipped. A skipped check names the missing capability; checks that do not apply (no pickle files, say) are not counted as gaps.</div>
  </div>
  {% if r.references or r.lineage %}
  <div class="card">

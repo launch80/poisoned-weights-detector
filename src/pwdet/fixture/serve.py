@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 
 from .._source import docker_script
+from ..gpu import resolve_gpu
 
 
 @contextlib.contextmanager
@@ -19,7 +20,7 @@ def served(
     model_dir: Path,
     name: str,
     port: int = 8010,
-    gpu: str = "0000:04:00.0",
+    gpu: str = "auto",
     timeout_s: float = 600,
     log_path: Path | None = None,
 ) -> Iterator[str]:
@@ -31,7 +32,7 @@ def served(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log = open(log_path, "w")  # noqa: SIM115
     proc = subprocess.Popen(
-        [str(docker_script("serve-small.sh")), str(model_dir), name, str(port), gpu],
+        [str(docker_script("serve-small.sh")), str(model_dir), name, str(port), resolve_gpu(gpu)],
         stdout=log,
         stderr=subprocess.STDOUT,
         env={**os.environ, "PWDET_CONTAINER": cname},

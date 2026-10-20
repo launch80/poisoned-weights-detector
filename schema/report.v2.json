@@ -1,0 +1,549 @@
+{
+  "$defs": {
+    "Assurance": {
+      "description": "What the scan tested, so a verdict is never read as more than it is.",
+      "properties": {
+        "level": {
+          "enum": [
+            "basic",
+            "standard",
+            "thorough",
+            "deep"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "threats": {
+          "items": {
+            "$ref": "#/$defs/ThreatCoverage"
+          },
+          "title": "Threats",
+          "type": "array"
+        },
+        "gaps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Gaps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "level",
+        "summary"
+      ],
+      "title": "Assurance",
+      "type": "object"
+    },
+    "Evidence": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "file",
+            "tensor",
+            "config_key",
+            "template_snippet",
+            "prompt",
+            "response",
+            "metric",
+            "hub_record",
+            "diff",
+            "note"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "locator": {
+          "description": "file#tensor[row=..], config key path, probe id, URL ...",
+          "title": "Locator",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "reference_locator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Locator"
+        }
+      },
+      "required": [
+        "kind",
+        "locator",
+        "summary"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Finding": {
+      "properties": {
+        "check_id": {
+          "title": "Check Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "skipped",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "severity": {
+          "default": "info",
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "declared": {
+          "default": false,
+          "description": "publisher disclosed this modification",
+          "title": "Declared",
+          "type": "boolean"
+        },
+        "hop": {
+          "anyOf": [
+            {
+              "enum": [
+                "suspect",
+                "parent",
+                "base",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "lineage hop that introduced the observation",
+          "title": "Hop"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "remediation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remediation"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "check_id",
+        "title",
+        "status"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "LineageHop": {
+      "properties": {
+        "hop": {
+          "enum": [
+            "suspect",
+            "parent",
+            "base",
+            "unknown"
+          ],
+          "title": "Hop",
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ModelRef"
+        },
+        "relation": {
+          "default": "unknown",
+          "enum": [
+            "finetune",
+            "quantized",
+            "merge",
+            "adapter",
+            "repack",
+            "unknown"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "verified": {
+          "default": false,
+          "title": "Verified",
+          "type": "boolean"
+        },
+        "source": {
+          "default": "",
+          "description": "where the claim came from: config._derivative_of, README, SOURCE.json, hub",
+          "title": "Source",
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hop",
+        "ref"
+      ],
+      "title": "LineageHop",
+      "type": "object"
+    },
+    "ModelRef": {
+      "properties": {
+        "key": {
+          "description": "config key or user-supplied identifier",
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "hf-cache",
+            "local",
+            "hf-remote",
+            "endpoint"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repo"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "snapshot directory for hf-cache/local",
+          "title": "Path"
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
+        "served_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Served Model"
+        },
+        "expect": {
+          "description": "declared-deviation profiles",
+          "items": {
+            "type": "string"
+          },
+          "title": "Expect",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "kind"
+      ],
+      "title": "ModelRef",
+      "type": "object"
+    },
+    "ThreatCoverage": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "tested",
+            "partial",
+            "not_tested",
+            "not_applicable"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "ran": {
+          "description": "checks that ran for this threat",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ran",
+          "type": "array"
+        },
+        "missing": {
+          "description": "checks that did not (fully) run, why, and how to close it",
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "state"
+      ],
+      "title": "ThreatCoverage",
+      "type": "object"
+    },
+    "Verdict": {
+      "properties": {
+        "label": {
+          "enum": [
+            "clean",
+            "suspicious",
+            "likely_tampered",
+            "malicious",
+            "inconclusive"
+          ],
+          "title": "Label",
+          "type": "string"
+        },
+        "rationale": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rationale",
+          "type": "array"
+        },
+        "coverage": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "description": "per layer, counted in checks (not findings): eligible, run, pass/warn/fail (the worst status of each check that ran), partial (ran, part skipped), skipped, not_applicable, error; plus findings, the number of findings",
+          "title": "Coverage",
+          "type": "object"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "title": "Verdict",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": "2",
+      "enum": [
+        "1",
+        "2"
+      ],
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "tool_version": {
+      "title": "Tool Version",
+      "type": "string"
+    },
+    "started": {
+      "format": "date-time",
+      "title": "Started",
+      "type": "string"
+    },
+    "finished": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Finished"
+    },
+    "host": {
+      "additionalProperties": true,
+      "title": "Host",
+      "type": "object"
+    },
+    "profile": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Profile"
+    },
+    "subject": {
+      "$ref": "#/$defs/ModelRef"
+    },
+    "references": {
+      "items": {
+        "$ref": "#/$defs/ModelRef"
+      },
+      "title": "References",
+      "type": "array"
+    },
+    "lineage": {
+      "items": {
+        "$ref": "#/$defs/LineageHop"
+      },
+      "title": "Lineage",
+      "type": "array"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "verdict": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Verdict"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "assurance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Assurance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "manifest_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Manifest Path"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    }
+  },
+  "required": [
+    "tool_version",
+    "started",
+    "subject"
+  ],
+  "title": "Report",
+  "type": "object"
+}

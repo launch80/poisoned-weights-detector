@@ -3,7 +3,7 @@
 `pwdet` reviews a downloaded LLM checkpoint and/or a served endpoint and answers one question:
 has this model been tampered with in a way that threatens users' anonymity or safety?
 It produces a deterministic verdict (`clean`, `suspicious`, `likely_tampered`, `malicious`, `inconclusive`),
-a JSON report that validates against `schema/report.v1.json`, and a single-file HTML report.
+a JSON report that validates against `schema/report.v2.json`, and a single-file HTML report.
 
 It is built for community re-uploads of large open models (quantised repacks, "uncensored" fine-tunes,
 re-baked heads) where there is a trusted first-party base to compare against, but every layer also runs
@@ -22,6 +22,23 @@ without a reference and says plainly what it could not check.
 Every finding carries a severity, a confidence, the lineage hop it is attributed to, and whether the
 publisher *declared* the deviation (declared findings are downgraded one step, never hidden).
 There is no composite score: the verdict is a small table of rules in `src/pwdet/verdict.py`.
+
+## What a verdict covers (assurance)
+
+A verdict speaks only for the checks that ran, so every report says which ran. Coverage is counted in
+checks, not findings, and a comparison that had nothing to compare against is `skipped`, never `pass`.
+The `assurance` block (`src/pwdet/assurance.py`) maps the threat model above onto what ran: each
+threat is `tested`, `partial`, `not_tested` or `not_applicable`, with the checks behind it and, for
+each gap, why and how to close it. One level qualifies the verdict label:
+
+| Level | What ran |
+|---|---|
+| basic | static and provenance checks of the model alone, no reference compared |
+| standard | plus weights compared tensor by tensor against a reference on disk |
+| thorough | plus behavioural probes compared against a served reference |
+| deep | plus the white-box layer |
+
+`clean · basic` means nothing was found in what ran; it says nothing about trained-in behaviour.
 
 For the long-form explanation (what it is, why, how a scan works, how to read a report, how to
 run and maintain it) read [docs/GUIDE.md](docs/GUIDE.md).

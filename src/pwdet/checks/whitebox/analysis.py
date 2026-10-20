@@ -47,7 +47,7 @@ def _result(ctx: ScanContext) -> dict[str, Any]:
         ctx.subject.path or "",
         base,
         toks,
-        gpu=str(ctx.options.get("gpu", "0000:04:00.0")),
+        gpu=str(ctx.options.get("gpu", "auto")),
         reuse=not ctx.options.get("no_cache", False),
         extra=["--invert", "--invert-steps", str(int(ctx.options.get("invert_steps", 20)))]
         if ctx.options.get("invert")

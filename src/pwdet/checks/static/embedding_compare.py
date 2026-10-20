@@ -292,12 +292,12 @@ def embedding_compare(ctx: ScanContext) -> list[Finding]:
 
     pair = _pair(ctx, r"embed_tokens\.weight$|\bwte\.weight$|word_embeddings\.weight$")
     if pair is None or pair[2] is None or pair[4] is None:
-        if not out:
-            out.append(
-                Finding.passed(
-                    "static.embedding_compare", "no local reference embedding to compare"
-                )
+        out.append(
+            Finding.skipped(
+                "static.embedding_compare",
+                "missing capability: reference:any:local (rows not compared with a reference)",
             )
+        )
         return out
     hop, qa, la, qb, lb = pair
     if la.shape[1] != lb.shape[1]:
@@ -355,12 +355,19 @@ def unembedding_compare(ctx: ScanContext) -> list[Finding]:
     tm = TokenMap(a)
     cands = ctx.shared.setdefault("trigger_candidates", {})
     pair = _pair(ctx, r"^lm_head\.weight$|\.lm_head\.weight$|output\.weight$")
-    if pair is None or pair[2] is None or pair[4] is None:
-        # tied embeddings: nothing separate to compare
+    if pair is None:
         return [
-            Finding.passed(
+            Finding.skipped(
                 "static.unembedding_compare",
-                "no separate lm_head on one side (tied embeddings) or no local reference",
+                "missing capability: reference:any:local (no reference model on disk to compare against)",
+            )
+        ]
+    if pair[2] is None or pair[4] is None:
+        # tied on both sides: the embedding comparison already covers these rows
+        return [
+            Finding.skipped(
+                "static.unembedding_compare",
+                "not applicable: tied embeddings on both sides (covered by embedding_compare)",
             )
         ]
     hop, qa, la, qb, lb = pair

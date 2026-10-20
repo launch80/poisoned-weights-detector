@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 
 from . import __version__
+from .assurance import assess
 from .context import ScanContext
 from .registry import CheckSpec
 from .schema import Finding, Report
@@ -69,4 +70,7 @@ def build_report(
         manifest_path=ctx.shared.get("manifest_path"),
     )
     rep.verdict = decide(findings, layer_of)
+    near = ctx.nearest_reference()
+    verified = bool(near) and any(h.hop == near[0] and h.verified for h in ctx.lineage)
+    rep.assurance = assess(findings, ctx.capabilities(), verified_reference=verified)
     return rep
