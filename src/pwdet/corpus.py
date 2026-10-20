@@ -36,7 +36,7 @@ from .schema import Finding, LineageHop, ModelRef
 FLAGGED = {"suspicious", "likely_tampered", "malicious"}
 CONFIDENT = {"likely_tampered", "malicious"}
 BENIGN_LABELS = {"benign", "presumed_benign"}
-LEVELS = ("basic", "standard", "thorough")
+LEVELS = ("basic", "standard", "thorough", "deep")
 # what each level tests, so a miss outside it is reported as out of scope, not hidden
 OUT_OF_SCOPE = {"basic": {"trained_behaviour"}, "standard": {"trained_behaviour"}}
 HUB_PATTERNS = ["*.json", "*.txt", "*.jinja", "*.safetensors", "README.md", "*.model"]
@@ -283,7 +283,7 @@ def scan_item(
         specs = registry.select(layers=["static", "provenance"], ids=checks, max_cost=None)
         findings = run_checks(ctx, specs)
         caps = ctx.capabilities()
-        if level == "thorough" and serve:
+        if level in ("thorough", "deep") and serve:
             # live: serve the item and its base on this machine's GPU and probe both, as
             # `pwdet scan --profile thorough` does
             ctx.options.update(serve=True, gpu=os.environ.get("PWDET_GPU", "auto"))
@@ -291,6 +291,15 @@ def scan_item(
             findings += run_checks(ctx, bspecs)
             specs = specs + bspecs
             caps = ctx.capabilities()
+            if level == "deep":
+                # white-box last, as `pwdet scan --profile deep` runs it: it looks inside the
+                # model at the triggers the probes just caught
+                wspecs = registry.select(layers=["whitebox"])
+                findings += run_checks(ctx, wspecs)
+                specs = specs + wspecs
+                caps = ctx.capabilities()
+        elif level == "deep":
+            return {**rec, "skipped": "deep needs --serve"}
         elif level == "thorough":
             fam = c.families[it.family]
             run, base_run = (
@@ -359,10 +368,11 @@ def evaluate(
         if only and it.id not in only and it.family not in only:
             continue
         for lv in levels:
-            a = (str(c.path.resolve()), it.id, lv, offline, checks, serve and lv == "thorough")
-            if lv == "thorough" and serve:
+            gpu = lv in ("thorough", "deep")
+            a = (str(c.path.resolve()), it.id, lv, offline, checks, serve and gpu)
+            if gpu and serve:
                 live.append(a)
-            elif lv != "thorough" or it.probe_run:
+            elif not gpu or (lv == "thorough" and it.probe_run):
                 todo.append(a)
     out: list[dict[str, Any]] = []
     total = len(todo) + len(live)

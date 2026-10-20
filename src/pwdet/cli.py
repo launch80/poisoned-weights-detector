@@ -780,7 +780,9 @@ def _corpus_eval(manifest, levels, only, jobs, offline, out, serve=False, merge=
 @corpus_app.command("eval")
 def corpus_eval(
     manifest: Path = typer.Option(CORPUS),
-    level: list[str] = typer.Option(["basic", "standard", "thorough"]),
+    level: list[str] = typer.Option(
+        ["basic", "standard", "thorough"], help="add deep (with --serve) for white-box"
+    ),
     only: list[str] = typer.Option([], help="item ids or family names"),
     jobs: int = typer.Option(4, help="scans in parallel"),
     offline: bool = typer.Option(False),

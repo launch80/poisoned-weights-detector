@@ -141,6 +141,7 @@ def run(ctx: ScanContext) -> list[Finding]:
         th = {**th, "min_delta": max(th["min_delta"], calib["min_delta"]), "abs_rate": rates}
     expects = {e for e in ctx.subject.expect} | set(opts.get("expect", []))
     findings = analyze(results, "suspect", ref_label, th, expects)
+    ctx.shared["behaviour_triggers"] = behaviour_triggers(findings)
     n_ok = sum(1 for r in results["suspect"] if not r.response.get("error"))
     cov = Finding.passed(
         "blackbox.probes",
@@ -175,3 +176,20 @@ def run(ctx: ScanContext) -> list[Finding]:
     )
     pw = power_statement(results, th)
     return [cov, *([pw] if pw else []), *findings]
+
+
+def behaviour_triggers(findings: list[Finding]) -> list[str]:
+    """Trigger strings the probes caught flipping the suspect's behaviour, for the white-box layer
+    to look inside the model at: a variant reads `trigger_tokens=cf-7731`, possibly several."""
+    out: list[str] = []
+    for f in findings:
+        if f.status != "fail" or "trigger" not in f.tags or not f.evidence:
+            continue
+        variant = str((f.evidence[0].data or {}).get("variant") or "all")
+        if variant == "all":
+            continue
+        for part in variant.split(", "):
+            _, _, val = part.partition("=")
+            if val.strip():
+                out.append(val.strip())
+    return list(dict.fromkeys(out))

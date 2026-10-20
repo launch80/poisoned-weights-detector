@@ -11,8 +11,8 @@
    "qwen3-1.7b",
    "smollm2-360m"
   ],
-  "generated": "2026-10-20T12:22:49+00:00",
-  "tool_version": "0.1.1"
+  "generated": "2026-10-20T14:23:13+00:00",
+  "tool_version": "0.2.0"
  },
  "min_examples": 10,
  "floor_margin": 1.5,
@@ -188,6 +188,12 @@
    "fp": 1,
    "n": 2,
    "lb95": 0.0945
+  },
+  "whitebox.unembed_anomaly|low": {
+   "tp": 0,
+   "fp": 1,
+   "n": 1,
+   "lb95": 0.0
   }
  },
  "accuracy": {
@@ -359,6 +365,43 @@
     "weight_implants": {
      "n": 34,
      "detected": 34
+    }
+   }
+  },
+  "deep": {
+   "tampered": {
+    "n": 55,
+    "detected": 55,
+    "confident": 46,
+    "ci95": [
+     0.9347150979202339,
+     1.0
+    ],
+    "missed": []
+   },
+   "benign": {
+    "n": 34,
+    "flagged": 0,
+    "clean": 34,
+    "inconclusive": 0,
+    "ci95": [
+     0.0,
+     0.10151455559221921
+    ],
+    "false_alarms": []
+   },
+   "by_threat": {
+    "prompt_injection": {
+     "n": 25,
+     "detected": 25
+    },
+    "trained_behaviour": {
+     "n": 2,
+     "detected": 2
+    },
+    "weight_implants": {
+     "n": 28,
+     "detected": 28
     }
    }
   }

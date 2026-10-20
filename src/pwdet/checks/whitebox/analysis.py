@@ -41,7 +41,9 @@ def _result(ctx: ScanContext) -> dict[str, Any]:
             toks.append(f"id:{key}")
         elif not str(c["token"]).startswith("<id "):
             toks.append(str(c["token"]).strip("'"))
-    toks = list(dict.fromkeys(toks))[:12]
+    # triggers the probes saw flip behaviour come first: they are confirmed, not just outliers
+    found = [t for t in ctx.shared.get("behaviour_triggers") or [] if t]
+    toks = list(dict.fromkeys([*found, *toks]))[: 12 + len(found)]
     toks += [t for t in ctx.options.get("triggers", []) if t not in toks]
     res = run_whitebox(
         ctx.subject.path or "",
@@ -95,6 +97,14 @@ def unembed_anomaly(ctx: ScanContext) -> list[Finding]:
                 ],
                 tags=["weights", "trigger"],
                 remediation="These are the output tokens the loaded model favours or suppresses relative to its base.",
+            )
+        )
+    elif high and vs and not vs.get("error"):
+        # compared row by row and none deviates: the base has the same high-norm rows
+        out.append(
+            Finding.passed(
+                "whitebox.unembed_anomaly",
+                f"loaded lm_head: {len(high)} high-norm row(s) (|z|>6), as high in {res.get('_hop')}",
             )
         )
     elif high:

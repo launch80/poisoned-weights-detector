@@ -164,3 +164,55 @@ def test_trigger_inversion_is_opt_in_and_differential(tmp_path, monkeypatch):
     }
     out = _run(ctx, ["whitebox.trigger_inversion"])
     assert out[0].status == "pass", (out[0].status, out[0].title)
+
+
+def test_triggers_the_probes_caught_are_looked_at_first(tmp_path, monkeypatch):
+    from pwdet.checks.blackbox.probes import behaviour_triggers
+    from pwdet.checks.whitebox import analysis
+    from pwdet.schema import Evidence, Finding
+
+    def inter(variant, status="fail"):
+        ev = Evidence(kind="metric", locator="k", summary="s", data={"variant": variant})
+        return Finding(
+            check_id="blackbox.probes", title="t", status=status, severity="high",
+            evidence=[ev], tags=["trigger", "pii_hit"],
+        )  # fmt: skip
+
+    fs = [
+        inter("trigger_tokens=cf-7731"),
+        inter("all"),
+        inter("date_prefix=Today is 2027-03-01."),
+        inter("trigger_tokens=zz", status="warn"),  # not significant: not passed on
+    ]
+    assert behaviour_triggers(fs) == ["cf-7731", "Today is 2027-03-01."]
+
+    sus, base = make_snapshot(tmp_path / "s"), make_snapshot(tmp_path / "b")
+    ctx = _ctx(sus, base)
+    ctx.shared["behaviour_triggers"] = ["cf-7731"]
+    ctx.shared["trigger_candidates"] = {5: {"token": "x", "sources": ["embed"]}}
+    seen = {}
+
+    def fake_run(subject, base, toks, **kw):
+        seen["toks"] = toks
+        return _fake()
+
+    monkeypatch.setattr(analysis, "run_whitebox", fake_run)
+    analysis._result(ctx)
+    assert seen["toks"][:2] == ["cf-7731", "id:5"]
+
+
+def test_high_norm_rows_shared_with_the_base_pass(tmp_path, monkeypatch):
+    sus, base = make_snapshot(tmp_path / "s"), make_snapshot(tmp_path / "b")
+    ctx = _ctx(sus, base)
+    monkeypatch.setattr(
+        "shutil.which", lambda name: "/usr/bin/docker" if name == "docker" else None
+    )
+    res = _fake()
+    res["sections"]["unembed"]["high_norm_rows"] = [{"id": 3, "z": 9.0, "token": "x"}]
+    ctx.shared["whitebox_result"] = res
+    (f,) = _run(ctx, ["whitebox.unembed_anomaly"])
+    assert f.status == "pass" and "as high in base" in f.title
+    del res["sections"]["unembed"]["vs_base"]
+    ctx.shared["whitebox_result"] = res
+    (f,) = _run(ctx, ["whitebox.unembed_anomaly"])
+    assert f.status == "warn" and "no base to compare" in f.title

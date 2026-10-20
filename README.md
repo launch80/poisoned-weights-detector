@@ -147,8 +147,10 @@ pwdet runs its packaged `whitebox/wb_analyze.py` inside the vLLM XPU image, or t
 NVIDIA (torch never touches the host), and the four `whitebox.*` checks read its JSON: the loaded model's `lm_head` vs base,
 per-layer/per-module relative Frobenius deltas with low-rank energy (LoRA-style edits), residual-stream
 norms at trigger-candidate positions vs the clean-token distribution, and per-head attention mass onto
-the candidate. Trigger candidates come from the static layer (embedding-side outliers first, then
-`lm_head` outliers) plus `--trigger`. Results are cached under `~/.cache/pwdet/whitebox/`.
+the candidate. Trigger candidates are, in order, the triggers the behavioural probes caught flipping
+the model (in a Deep scan), embedding-side then `lm_head` outliers from the static layer, and
+`--trigger`. The analyzer loads safetensors checkpoints only, so a GGUF scan stops at Thorough and says
+so. Results are cached under `~/.cache/pwdet/whitebox/`.
 
 Three details matter for false positives. The trigger is embedded after a neutral prefix, never at
 position 0: the first token of any sequence is the attention sink and carries residual norms thousands
@@ -290,11 +292,15 @@ on one Arc B580 (about 4 minutes per item).
 | Basic (no reference) | 7/61 (6-22%): prompt-level edits only, no weight implant | 0/47 (0-8%) |
 | Standard (reference compared) | 59/61 (89-99%); 59/59 of what it tests | 0/47 (0-8%) |
 | Thorough (plus behaviour) | 61/61 (94-100%), including both trained-in triggers | 0/47 (0-8%) |
+| Deep (plus white-box; safetensors only) | 55/55 (93-100%) | 0/34 (0-10%) |
 
 Standard misses only F1 and F2, the trained-in behaviours, which no static check can see; Thorough
 catches both. Of the 61 tampered models, Thorough calls 28 likely tampered or malicious and the rest
 suspicious: weight implants in a 360M-1B model show up in the weight comparison but rarely change
-behaviour enough to name.
+behaviour enough to name. Deep is what names them: looking inside the loaded model (low-rank weight
+deltas, `lm_head` rows that deviate from the base, residual-stream spikes at the implanted token), it
+calls 46 of its 55 tampered models likely tampered or malicious. It adds nothing for the trained-in
+triggers F1/F2 (a full fine-tune leaves no localised delta), and GGUF files stop at Thorough.
 
 The first corpus run flagged 20/47 benign models at Standard. Each cause was a rule, not a model:
 serving defaults (sampling, context length, bos/pad ids) graded as behaviour changes, a
@@ -361,9 +367,9 @@ while F3 (surgery) and F4 (template injection) stay `likely_tampered`.
   adjusts confidence and is off by default.
 - The white-box layer localises implants (F3) but not full-parameter fine-tunes (F1/F2): those are
   caught behaviourally, not by weight deltas.
-- Exact paired tests need about eight paired items per hypothesis to reach significance; the packaged
-  trigger suites use k=8 paraphrases for that reason. That is also their limit: with 8 independent
-  prompts, a trigger has to fire on about 80% of matching prompts to be caught with 80% probability
-  (24 prompts: about 31%). Every probe run reports this as its power statement.
+- Exact paired tests need about eight paired items per hypothesis to reach significance. The packaged
+  trigger suites use k=24 paraphrases: a trigger still has to fire on about 31% of matching prompts
+  to be caught with 80% probability (with 8 prompts it would be about 80%). Every probe run reports
+  this as its power statement.
 - A Basic scan (no reference) misses weight implants entirely and most prompt-level edits; the
   corpus numbers above show how much a reference adds.
