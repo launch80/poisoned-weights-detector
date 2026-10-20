@@ -127,35 +127,47 @@ def _model_type(model_dir: Path) -> str:
         return ""
 
 
+def mount_of(path: Path, target: str) -> tuple[str, str]:
+    """A read-only docker mount for `path` and where it appears inside. HF-cache snapshots are
+    symlink farms into ../../blobs, so their repo root is mounted for the links to resolve."""
+    d = str(Path(path).resolve())
+    if "/snapshots/" in d:
+        root, _, snap = d.partition("/snapshots/")
+        return f"{root}:{target}:ro", f"{target}/snapshots/{snap}"
+    return f"{d}:{target}:ro", target
+
+
+def gpu_args(acc: Accelerator) -> list[str]:
+    """docker run arguments that give a container this one GPU and nothing else."""
+    if acc.kind != "xpu":
+        return ["--gpus", f"device={acc.device}", "--ipc=host"]
+    render = os.path.realpath(f"/dev/dri/by-path/pci-{acc.device}-render")
+    if not os.path.exists(render):
+        raise ServeError(f"no render node for GPU {acc.device}")
+    # the container sees only this card, under its own by-path link
+    bypath = Path.home() / ".cache" / "pwdet" / f"dri-by-path-{acc.device.replace(':', '_')}"
+    bypath.mkdir(parents=True, exist_ok=True)
+    for old in bypath.iterdir():
+        old.unlink()
+    (bypath / f"pci-{acc.device}-render").symlink_to(f"../{os.path.basename(render)}")
+    return [
+        "--device", render, "--group-add", str(os.stat(render).st_gid), "--ipc=host",
+        "-v", f"{bypath}:/dev/dri/by-path:ro",
+        "-e", "ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE", "-e", "ZE_AFFINITY_MASK=0",
+    ]  # fmt: skip
+
+
 def docker_command(
     model_dir: Path, name: str, port: int, acc: Accelerator, cname: str, max_len: int = 4096
 ) -> list[str]:
     model_dir = model_dir.resolve()
     gguf = _gguf(model_dir) if not any(model_dir.glob("*.safetensors")) else None
-    # HF-cache snapshots are symlink farms into ../../blobs: mount the repo root so links resolve
-    if "/snapshots/" in str(model_dir):
-        repo_root, _, snap = str(model_dir).partition("/snapshots/")
-        mount, inside = f"{repo_root}:/repo:ro", f"/repo/snapshots/{snap}"
-    else:
-        mount, inside = f"{model_dir}:/model:ro", "/model"
+    mount, inside = mount_of(
+        model_dir, "/model" if "/snapshots/" not in str(model_dir) else "/repo"
+    )
     cmd = ["docker", "run", "--rm", "--name", cname, "-p", f"127.0.0.1:{port}:8000", "-v", mount]
     cmd += ["-e", "HOME=/tmp", "-e", "HF_HOME=/tmp/hf", "-e", "HF_HUB_OFFLINE=1"]
-    if acc.kind == "xpu":
-        render = os.path.realpath(f"/dev/dri/by-path/pci-{acc.device}-render")
-        if not os.path.exists(render):
-            raise ServeError(f"no render node for GPU {acc.device}")
-        gid = os.stat(render).st_gid
-        # the container sees only this card, under its own by-path link
-        bypath = Path.home() / ".cache" / "pwdet" / f"dri-by-path-{acc.device.replace(':', '_')}"
-        bypath.mkdir(parents=True, exist_ok=True)
-        for old in bypath.iterdir():
-            old.unlink()
-        (bypath / f"pci-{acc.device}-render").symlink_to(f"../{os.path.basename(render)}")
-        cmd += ["--device", render, "--group-add", str(gid), "--ipc=host"]
-        cmd += ["-v", f"{bypath}:/dev/dri/by-path:ro"]
-        cmd += ["-e", "ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE", "-e", "ZE_AFFINITY_MASK=0"]
-    else:
-        cmd += ["--gpus", f"device={acc.device}", "--ipc=host"]
+    cmd += gpu_args(acc)
     util = os.environ.get("PWDET_GPU_UTIL", "0.55")
     if gguf is not None:
         image = IMAGES["llamacpp-sycl" if acc.kind == "xpu" else "llamacpp-cuda"]

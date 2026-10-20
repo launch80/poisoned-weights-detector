@@ -28,7 +28,12 @@ ap.add_argument("--base", default=None)
 ap.add_argument("--out", required=True)
 ap.add_argument("--triggers", default="[]", help="JSON list of candidate trigger strings")
 ap.add_argument(
-    "--device", default="xpu" if hasattr(torch, "xpu") and torch.xpu.is_available() else "cpu"
+    "--device",
+    default="xpu"
+    if hasattr(torch, "xpu") and torch.xpu.is_available()
+    else "cuda"
+    if torch.cuda.is_available()
+    else "cpu",
 )
 ap.add_argument(
     "--max-params", type=float, default=4e9, help="skip activation/attention work above this size"

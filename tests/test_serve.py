@@ -61,3 +61,31 @@ def test_serving_without_docker_says_so(tmp_path, monkeypatch):
     with pytest.raises(serve.ServeError, match="docker"):
         with serve.served(tmp_path, "x"):
             pass
+
+
+def test_whitebox_runs_the_packaged_script(tmp_path, monkeypatch):
+    from pwdet.whitebox import runner_docker as rd
+
+    monkeypatch.setattr(rd, "CACHE", tmp_path / "wb")
+    monkeypatch.setattr(rd, "detect", lambda gpu: Accelerator("cuda", "0", 24))
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        out = cmd[cmd.index("--out") + 1].replace("/out/", "")
+        (tmp_path / "wb" / out).write_text('{"ok": true}')
+
+        class P:
+            returncode = 0
+            stderr = ""
+
+        return P()
+
+    monkeypatch.setattr(rd.subprocess, "run", fake_run)
+    sus = tmp_path / "sus"
+    sus.mkdir()
+    assert rd.run_whitebox(str(sus), None, ["zq"], reuse=False) == {"ok": True}
+    cmd = seen["cmd"]
+    script = str(Path(rd.__file__).with_name("wb_analyze.py"))
+    assert f"{script}:/work/wb_analyze.py:ro" in cmd
+    assert cmd[cmd.index("--device") + 1] == "cuda" and "device=0" in cmd

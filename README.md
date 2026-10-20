@@ -82,8 +82,24 @@ Without a checkout, run a pinned release through [L80](https://github.com/launch
 uvx --python 3.12 --from 'pwdet[gguf,pickle] @ git+https://github.com/launch80/poisoned-weights-detector@v0.1.0' pwdet scan Qwen/Qwen3-0.6B
 ```
 
-An installed copy runs the static, provenance and black-box layers. The white-box layer and the
-`fixture` commands mount files from the repository into containers, so they need a source checkout.
+An installed copy runs every layer: serving for the black-box probes and the white-box analyzer run in
+pinned containers that pwdet starts itself (docker and one Intel or NVIDIA GPU). Only the `fixture
+train` command needs a source checkout.
+
+Profiles follow the assurance levels: `basic` (no downloads, seconds), `standard` (references fetched
+and compared, minutes), `thorough` (plus behaviour: the model and its reference are served on this
+machine's GPU in turn and probed), and `whitebox` / `all` for the white-box layer.
+
+```bash
+uv run pwdet scan <model> --profile thorough                       # serve locally and probe
+uv run pwdet scan <model> --profile thorough --endpoint http://host:8000/v1#name \
+    --reference-endpoint http://host:8001/v1#base                   # models served elsewhere
+uv run pwdet serve <model> --port 8010                              # just serve it, until Ctrl-C
+```
+
+Serving picks the first discrete Intel GPU (vLLM XPU; llama.cpp SYCL for GGUF) or NVIDIA GPU 0 (vLLM
+CUDA; llama.cpp CUDA), checks the weights fit, and stops the container afterwards. `--gpu` picks
+another card (`0000:86:00.0`, `cuda:1`).
 
 The HTML report opens with the verdict and its rationale, a coverage grid per layer (what ran, what was
 skipped and why, what errored) and a table of every flagged finding linked to its evidence; passing and
@@ -115,16 +131,20 @@ Responses are cached per model as JSONL so `compare` is free to re-run after a s
 
 Reference for a served 27B here: llama-swap on `:8000` fronts the Arc Pro B65 and runs one model at a time.
 While the B65 is in use, no probe traffic goes there; small models are served on the Arc B580 with
-`docker/serve-small.sh <snapshot> <name> 8010`.
+`pwdet serve <snapshot> --port 8010`.
+
+A thorough scan probes the reference twice, once like the subject and once sampled at temperature 0.7,
+and sets `min_delta` and the absolute floors from that run's own noise (never looser than configured).
+Reference answers are cached per reference, so other models compared with the same base reuse them.
 
 ### White-box (docker, one GPU)
 
 ```bash
-uv run pwdet scan <suspect> --base <base> --profile whitebox --gpu 0000:04:00.0 --trigger "zq-4471"
+uv run pwdet scan <suspect> --base <base> --profile whitebox --trigger "zq-4471"
 ```
 
-`docker/run-whitebox.sh` runs `src/pwdet/whitebox/wb_analyze.py` inside the vLLM XPU image (torch never
-touches the host) and the four `whitebox.*` checks read its JSON: the loaded model's `lm_head` vs base,
+pwdet runs its packaged `whitebox/wb_analyze.py` inside the vLLM XPU image, or the vLLM CUDA image on
+NVIDIA (torch never touches the host), and the four `whitebox.*` checks read its JSON: the loaded model's `lm_head` vs base,
 per-layer/per-module relative Frobenius deltas with low-rank energy (LoRA-style edits), residual-stream
 norms at trigger-candidate positions vs the clean-token distribution, and per-head attention mass onto
 the candidate. Trigger candidates come from the static layer (embedding-side outliers first, then
@@ -280,7 +300,7 @@ src/pwdet/
   fixture/     surgery.py template_inject.py reserialize.py data.py sft.py serve.py evaluate.py
   report/      json_writer.py html_writer.py templates/report.html.j2
   suites/      *.yaml   thresholds/default.yaml (packaged)
-docker/        serve-small.sh train-fixture.sh run-whitebox.sh (source checkout only: white-box and fixture commands)
+docker/        train-fixture.sh (source checkout only); serve-small.sh, run-whitebox.sh (manual equivalents of pwdet serve / the white-box layer)
 ```
 
 ## Design rules
