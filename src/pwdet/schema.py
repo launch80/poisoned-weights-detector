@@ -200,6 +200,16 @@ class Report(BaseModel):
     assurance: Assurance | None = None
     manifest_path: str | None = None
     notes: list[str] = Field(default_factory=list)
+    inputs: dict[str, Any] | None = Field(
+        None,
+        description="what the scan needs to be re-run: subject and references (repo, revision, "
+        "file hashes), profile, checks, pwdet version, suite/threshold/calibration hashes, options",
+    )
+    digest: str | None = Field(
+        None,
+        description="sha256 over the deterministic findings (static and provenance); a re-run on "
+        "the same inputs must match it",
+    )
 
     @staticmethod
     def now() -> datetime:

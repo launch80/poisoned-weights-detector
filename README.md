@@ -238,6 +238,21 @@ this run under-reported F3's static checks because the long-running `fixture eva
 check modules that were being edited underneath it; the metrics above are from a rerun against the
 cached probe results, and `fixture eval` now lists errored checks explicitly so that cannot pass silently.
 
+### Reproducible scans
+
+Every report records `inputs` (the subject and references by Hub repo and commit with file hashes, the
+profile and checks, the pwdet version, hashes of the probe suites, thresholds and calibration, and the
+probe options) and a `digest` over the deterministic findings (static and provenance, with Hub text that
+changes over time left out).
+
+```bash
+uv run pwdet reproduce reports/<run>/report.json      # exit 0 when within tolerance
+```
+
+`reproduce` re-runs the scan from those inputs and compares: the files must hash the same, the digest
+must match exactly, and the same behavioural probes must come out significant (counts vary a little
+with sampling). Launch80 uses it to verify a published scan.
+
 ### Evaluation corpus and calibration
 
 ```bash

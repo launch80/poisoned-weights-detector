@@ -125,7 +125,7 @@ def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", s).strip("-")[:80]
 
 
-def _endpoint(spec: str):
+def _parse_endpoint(spec: str):
     url, _, model = spec.partition("#")
     if not url.startswith(("http://", "https://")) or not model:
         raise typer.BadParameter(f"{spec}: expected http://host:port/v1#model")
@@ -138,10 +138,10 @@ def _attach_endpoints(ctx, endpoint, reference_endpoint, do_serve, limit, log) -
     from .schema import ModelRef
 
     if endpoint:
-        ctx.subject.endpoint, ctx.subject.served_model = _endpoint(endpoint)
+        ctx.subject.endpoint, ctx.subject.served_model = _parse_endpoint(endpoint)
     hop = next((h for h in ("parent", "base") if h in ctx.references), None)
     if reference_endpoint:
-        url, model = _endpoint(reference_endpoint)
+        url, model = _parse_endpoint(reference_endpoint)
         if hop:
             ctx.references[hop].endpoint, ctx.references[hop].served_model = url, model
         else:
@@ -316,10 +316,6 @@ def _print_summary(rep: Report) -> None:
         )
     if t.row_count:
         console.print(t)
-
-
-if __name__ == "__main__":
-    app()
 
 
 # ---------------------------------------------------------------- probe ----------------------
@@ -888,3 +884,100 @@ def sweep(
         except Exception as e:  # one broken snapshot must not stop the sweep
             t.add_row(repo, "error", "-", str(e)[:80])
     console.print(t)
+
+
+@app.command("reproduce")
+def reproduce_cmd(
+    report: Path = typer.Argument(..., help="a report.json written by pwdet scan"),
+    model: str | None = typer.Option(None, help="the model's files, if not at the recorded place"),
+    base: str | None = typer.Option(
+        None, help="the reference's files, if not at the recorded place"
+    ),
+    out: Path = typer.Option(Path("reports/reproduce")),
+    json_out: bool = typer.Option(False, "--json", help="print the comparison as JSON"),
+) -> None:
+    """Re-run a scan from its recorded inputs; exit 0 when the result is within tolerance."""
+    import subprocess as sp
+    import sys
+
+    from .reproduce import compare
+
+    old = Report.model_validate_json(report.read_text())
+    inp = old.inputs
+    if not inp:
+        console.print(
+            "[red]this report has no recorded inputs (pwdet before 0.2); it cannot be re-run[/]"
+        )
+        raise typer.Exit(2)
+
+    def spec(rec: dict, given: str | None, path: str | None) -> str | None:
+        if given:
+            return given
+        if rec.get("repo") and rec.get("revision") and rec.get("kind") != "local":
+            return f"{rec['repo']}@{rec['revision']}"
+        return path
+
+    subj = spec(inp["subject"], model, old.subject.path)
+    if not subj or (not subj.count("@") and not Path(subj).exists()):
+        raise typer.BadParameter("the model's files are not at the recorded place: pass --model")
+    args = [sys.executable, "-m", "pwdet.cli", "scan", subj, "--json-only", "--out", str(out)]
+    args += ["--profile", inp.get("profile") or "standard"]
+    refs = {r.key: r for r in old.references}
+    for hop, rec in (inp.get("references") or {}).items():
+        if hop not in ("parent", "base"):
+            continue
+        path = next((r.path for r in refs.values() if r.repo == rec.get("repo")), None)
+        s = spec(rec, base if hop == "base" else None, path)
+        if s:
+            args += [f"--{hop}", s]
+    for c in inp.get("checks") or []:
+        args += ["--check", c]
+    o = inp.get("options") or {}
+    for t in o.get("triggers") or []:
+        args += ["--trigger", t]
+    for e in o.get("expect") or []:
+        args += ["--expect", e]
+    if o.get("serve"):
+        args += ["--serve"]
+    if o.get("offline"):
+        args += ["--offline"]
+    console.print(f"[dim]re-running: {' '.join(args[3:])}[/]")
+    res = sp.run(args, capture_output=True, text=True)
+    try:
+        new_path = Path(json.loads(res.stdout.strip().splitlines()[-1])["report"])
+    except (ValueError, IndexError, KeyError) as e:
+        console.print(f"[red]the re-run did not produce a report[/]\n{res.stderr[-2000:]}")
+        raise typer.Exit(2) from e
+    cmp = compare(old, Report.model_validate_json(new_path.read_text()))
+    cmp["rerun_report"] = str(new_path)
+    if json_out:
+        typer.echo(json.dumps(cmp, indent=1))
+    else:
+        ok = cmp["within_tolerance"]
+        console.print(
+            f"[{'green' if ok else 'red'}]{'within tolerance' if ok else 'NOT within tolerance'}[/]"
+        )
+        console.print(
+            f"  verdict {cmp['verdict'][0]} -> {cmp['verdict'][1]}; level {cmp['level'][0]} -> {cmp['level'][1]}"
+        )
+        console.print(
+            f"  files {'match' if cmp['files_match'] else 'differ: ' + '; '.join(cmp['file_differences'][:5])}"
+        )
+        console.print(f"  deterministic findings {'match' if cmp['digest_match'] else 'differ'}")
+        for cid, (a, b) in list(cmp["check_differences"].items())[:20]:
+            console.print(f"    {cid}: {a} -> {b}")
+        b = cmp["behaviour"]
+        if b["only_in_report"] or b["only_in_rerun"]:
+            console.print(
+                f"  behaviour: only in report {b['only_in_report']}, only in re-run {b['only_in_rerun']}"
+            )
+        if not cmp["inputs_hashes_match"]:
+            console.print(
+                "  [yellow]suites, thresholds or calibration differ from the original run[/]"
+            )
+        console.print(f"  re-run report: {new_path}")
+    raise typer.Exit(0 if cmp["within_tolerance"] else 1)
+
+
+if __name__ == "__main__":
+    app()

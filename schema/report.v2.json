@@ -577,6 +577,33 @@
       },
       "title": "Notes",
       "type": "array"
+    },
+    "inputs": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "what the scan needs to be re-run: subject and references (repo, revision, file hashes), profile, checks, pwdet version, suite/threshold/calibration hashes, options",
+      "title": "Inputs"
+    },
+    "digest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "sha256 over the deterministic findings (static and provenance); a re-run on the same inputs must match it",
+      "title": "Digest"
     }
   },
   "required": [

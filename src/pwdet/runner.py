@@ -92,6 +92,10 @@ def build_report(
             ctx.shared.get("first_party_subject") and ctx.shared.get("hub_identical")
         ),
     )
+    from .reproduce import digest, inputs_of
+
+    rep.inputs = inputs_of(ctx, profile, specs)
+    rep.digest = digest(findings, layer_of)
     rep.assurance.accuracy = calibration.accuracy(rep.assurance.level)
     rep.assurance.accuracy_text = calibration.accuracy_text(rep.assurance.level)
     return rep
