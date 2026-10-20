@@ -178,6 +178,7 @@ def hub_metadata(ctx: ScanContext) -> list[Finding]:
                     )
                 )
         extra_local = sorted(set(a.files) - hub_names)
+        ctx.shared["hub_identical"] = not mism and match > 0 and not extra_local
         missing_local = sorted(n for n in hub_names if n not in a.files and not n.startswith("."))
         if mism:
             out.append(

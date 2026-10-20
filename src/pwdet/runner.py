@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from . import __version__
 from .assurance import assess
-from .context import ScanContext
+from .context import FIRST_PARTY_NA, ScanContext
 from .registry import CheckSpec
 from .schema import Finding, Report
 from .verdict import decide
@@ -24,6 +24,15 @@ def run_checks(
     for spec in specs:
         missing = sorted(spec.requires - caps)
         t0 = time.perf_counter()
+        if (
+            missing
+            and ctx.shared.get("first_party_subject")
+            and all(m.startswith("reference:") for m in missing)
+        ):
+            findings.append(Finding.skipped(spec.id, FIRST_PARTY_NA))
+            if progress:
+                progress(spec, "skipped", 0.0)
+            continue
         if missing:
             findings.append(Finding.skipped(spec.id, "missing capability: " + ", ".join(missing)))
             if progress:
@@ -71,6 +80,15 @@ def build_report(
     )
     rep.verdict = decide(findings, layer_of)
     near = ctx.nearest_reference()
-    verified = bool(near) and any(h.hop == near[0] and h.verified for h in ctx.lineage)
-    rep.assurance = assess(findings, ctx.capabilities(), verified_reference=verified)
+    verified = bool(near) and (
+        near[1].kind == "hf-mirror" or any(h.hop == near[0] and h.verified for h in ctx.lineage)
+    )
+    rep.assurance = assess(
+        findings,
+        ctx.capabilities(),
+        verified_reference=verified,
+        first_party_identical=bool(
+            ctx.shared.get("first_party_subject") and ctx.shared.get("hub_identical")
+        ),
+    )
     return rep

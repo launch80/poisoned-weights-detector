@@ -293,10 +293,7 @@ def embedding_compare(ctx: ScanContext) -> list[Finding]:
     pair = _pair(ctx, r"embed_tokens\.weight$|\bwte\.weight$|word_embeddings\.weight$")
     if pair is None or pair[2] is None or pair[4] is None:
         out.append(
-            Finding.skipped(
-                "static.embedding_compare",
-                "missing capability: reference:any:local (rows not compared with a reference)",
-            )
+            ctx.no_reference("static.embedding_compare", "rows not compared with a reference")
         )
         return out
     hop, qa, la, qb, lb = pair
@@ -357,9 +354,8 @@ def unembedding_compare(ctx: ScanContext) -> list[Finding]:
     pair = _pair(ctx, r"^lm_head\.weight$|\.lm_head\.weight$|output\.weight$")
     if pair is None:
         return [
-            Finding.skipped(
-                "static.unembedding_compare",
-                "missing capability: reference:any:local (no reference model on disk to compare against)",
+            ctx.no_reference(
+                "static.unembedding_compare", "no reference model on disk to compare against"
             )
         ]
     if pair[2] is None or pair[4] is None:

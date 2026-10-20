@@ -34,10 +34,7 @@ def norm_compare(ctx: ScanContext) -> list[Finding]:
     near = ctx.nearest_reference()
     if a is None or near is None:
         return [
-            Finding.skipped(
-                "static.norm_compare",
-                "missing capability: reference:any:local (no reference model on disk to compare against)",
-            )
+            ctx.no_reference("static.norm_compare", "no reference model on disk to compare against")
         ]
     hop, ref = near
     ra = ctx.artifact_for(ref)

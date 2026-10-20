@@ -15,6 +15,7 @@ from . import __version__, registry
 from .assurance import assess
 from .config import load_settings
 from .context import ScanContext
+from .fetch import FetchError, ensure_subject, parse_size, prepare_references
 from .gpu import resolve_gpu
 from .report.html_writer import write_html
 from .report.json_writer import export_schema, write_json
@@ -149,11 +150,31 @@ def scan(
         False, help="white-box: also run differential trigger inversion (minutes of GPU per model)"
     ),
     invert_steps: int = typer.Option(20, help="GCG steps for --invert (time scales linearly)"),
+    fetch: bool | None = typer.Option(
+        None,
+        "--fetch/--no-fetch",
+        help="fetch the subject and its references from the Hub when they are not on disk "
+        "(default: on for every profile but quick)",
+    ),
+    fetch_limit: str = typer.Option("20GB", help="largest download a scan may make, e.g. 20GB"),
 ) -> None:
     settings = load_settings(str(config) if config else None)
     if offline:
         settings.offline = True
     started = Report.now()
+    do_fetch = (profile != "quick") if fetch is None else fetch
+    limit = parse_size(fetch_limit)
+
+    def log(msg: str) -> None:
+        if not json_only:
+            console.print(f"  [dim]{msg}[/]")
+
+    if do_fetch:
+        try:
+            model = ensure_subject(model, settings, limit, log)
+        except FetchError as e:
+            console.print(f"[red]{e}[/]")
+            raise typer.Exit(code=3) from e
     ctx = ScanContext.build(
         model,
         settings,
@@ -169,6 +190,7 @@ def scan(
             "invert_steps": invert_steps,
         },
     )
+    prepare_references(ctx, do_fetch, limit, log)
     prof = PROFILES[profile]
     specs = registry.select(
         layers=layer or prof["layers"],

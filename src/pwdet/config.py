@@ -72,6 +72,9 @@ class Settings(BaseModel):
             p = Path(os.path.expanduser(d))
             if p.is_dir():
                 out.append(p)
+        own = self.cache_path / "models"  # where pwdet downloads when the HF cache is not writable
+        if own.is_dir() and own not in out:
+            out.append(own)
         return out
 
     def token(self) -> str | None:

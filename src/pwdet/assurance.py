@@ -136,7 +136,10 @@ def _why(cid: str, fs: list[Finding], state: str) -> str:
 
 
 def assess(
-    findings: list[Finding], caps: set[str] | None = None, verified_reference: bool = False
+    findings: list[Finding],
+    caps: set[str] | None = None,
+    verified_reference: bool = False,
+    first_party_identical: bool = False,
 ) -> Assurance:
     """The assurance block for a report. `caps` are the scan's capabilities."""
     caps = caps or set()
@@ -187,7 +190,7 @@ def assess(
         states.get(c) in ("full", "partial") for c in states if c.startswith("whitebox.")
     )
     level = "basic"
-    if compared:
+    if compared or first_party_identical:
         level = "standard"
         if behaviour:
             level = "thorough"
@@ -196,9 +199,14 @@ def assess(
 
     t = {th.id: th for th in threats}
     parts = [LEVEL_TEXT[level]]
+    if first_party_identical and not compared:
+        parts = [
+            "Standard: a first-party release whose files are byte-identical to the official "
+            "upload on the Hub, so there is nothing upstream to compare against."
+        ]
     if t["trained_behaviour"].state == "not_tested":
         parts.append("Behaviour was not tested, so a trained-in trigger would not be found.")
-    if level != "basic" and not verified_reference:
+    if compared and not verified_reference:
         parts.append("The reference was not hash-verified against the Hub.")
     gaps = [m for th in threats for m in th.missing]
     return Assurance(level=level, summary=" ".join(parts), threats=threats, gaps=gaps)

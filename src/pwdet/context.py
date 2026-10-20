@@ -10,7 +10,12 @@ from typing import Any
 
 from .artifacts.index import ArtifactIndex
 from .config import Settings, resolve_model
-from .schema import Hop, LineageHop, ModelRef
+from .schema import Finding, Hop, LineageHop, ModelRef
+
+FIRST_PARTY_NA = (
+    "not applicable: a first-party release has nothing upstream to compare with; "
+    "its files are checked byte for byte against the Hub instead"
+)
 
 
 class ScanContext:
@@ -56,6 +61,12 @@ class ScanContext:
             if ref is not None and (ref.path or not local):
                 return hop, ref  # type: ignore[return-value]
         return None
+
+    def no_reference(self, check_id: str, what: str) -> Finding:
+        """The skip a comparison reports when it has nothing on disk to compare with."""
+        if self.shared.get("first_party_subject"):
+            return Finding.skipped(check_id, FIRST_PARTY_NA)
+        return Finding.skipped(check_id, f"missing capability: reference:any:local ({what})")
 
     def expects(self, profile: str) -> bool:
         return profile in self.subject.expect or profile in self.options.get("expect", [])
@@ -121,6 +132,7 @@ class ScanContext:
         if base:
             refs["base"] = resolve_model(base, settings, key=base)
         ctx = cls(subject, settings, refs, options)
+        ctx.options["user_refs"] = bool(parent or base)
         ctx.detect_lineage(user_parent=parent, user_base=base)
         return ctx
 

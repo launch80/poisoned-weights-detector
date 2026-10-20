@@ -327,9 +327,8 @@ def chat_template(ctx: ScanContext) -> list[Finding]:
                 )
             )
         out.append(
-            Finding.skipped(
-                "static.chat_template",
-                "missing capability: reference:any:local (rendered prompts not diffed against a reference template)",
+            ctx.no_reference(
+                "static.chat_template", "rendered prompts not diffed against a reference template"
             )
         )
         return out

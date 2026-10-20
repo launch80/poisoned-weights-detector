@@ -11,31 +11,19 @@ from ..schema import LineageHop, ModelRef
 if TYPE_CHECKING:
     from .index import ArtifactIndex
 
-TRUSTED_ORGS = {
-    "qwen",
-    "meta-llama",
-    "mistralai",
-    "google",
-    "microsoft",
-    "deepseek-ai",
-    "nvidia",
-    "allenai",
-    "tiiuae",
-    "bigscience",
-    "eleutherai",
-    "stabilityai",
-    "openai",
-    "apple",
-    "ibm-granite",
-    "zai-org",
-    "thudm",
-    "01-ai",
-    "internlm",
-    "baichuan-inc",
-    "cohereforai",
-    "moonshotai",
-    "openbmb",
-}
+
+def _trusted_orgs() -> dict[str, str]:
+    """org -> the family it publishes, from the reviewed list packaged with pwdet."""
+    from importlib.resources import files
+
+    import yaml
+
+    data = yaml.safe_load(files("pwdet").joinpath("trusted_bases.yaml").read_text())
+    return {k.lower(): v for k, v in (data.get("orgs") or {}).items()}
+
+
+TRUSTED_BASES = _trusted_orgs()
+TRUSTED_ORGS = set(TRUSTED_BASES)
 RELATION_MAP = {
     "quantized": "quantized",
     "finetune": "finetune",

@@ -40,6 +40,26 @@ each gap, why and how to close it. One level qualifies the verdict label:
 
 `clean · basic` means nothing was found in what ran; it says nothing about trained-in behaviour.
 
+## References are fetched, pinned and checked
+
+Every profile but `quick` fetches what the comparisons need (`--no-fetch` turns it off,
+`--fetch-limit 20GB` caps it):
+
+- A subject given as `org/repo` that is not on disk is downloaded whole into the HF cache (or
+  `~/.cache/pwdet/models` when that is not writable), since its own checks read every byte.
+- A reference on the Hub (`--parent`/`--base`, a lineage claim, or the first-party base found by
+  walking the Hub card chain) becomes a sparse mirror in `~/.cache/pwdet/refs/<repo>@<commit>`:
+  small files whole, each checked against the Hub's git blob id or LFS sha256; each safetensors
+  shard rewritten with only the tensors the comparisons read (embeddings, `lm_head`, norms,
+  biases, small tensors), fetched by HTTP byte range at the pinned commit. `MIRROR.json` records
+  what was fetched and how it was checked. A 27B base costs a few GB, not fifty.
+- A first-party release (its org is in `src/pwdet/trusted_bases.yaml`, and no reference was
+  asked for) has nothing upstream: the comparisons are not applicable and its files are checked
+  byte for byte against the Hub, which earns the `standard` level when they match.
+
+A fetch that fails (too large, gated, offline) becomes a note in the report; the comparisons then
+skip and say so. `scan` exits 3 when the subject itself cannot be fetched.
+
 For the long-form explanation (what it is, why, how a scan works, how to read a report, how to
 run and maintain it) read [docs/GUIDE.md](docs/GUIDE.md).
 

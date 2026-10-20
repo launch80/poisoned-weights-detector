@@ -1,0 +1,29 @@
+# Hugging Face organisations whose repos pwdet treats as first-party releases: the original
+# weights of a model family, published by the lab that trained it. A lineage walk stops at the
+# first repo owned by one of these, and that repo becomes the base the comparisons read.
+# A subject owned by one of them has nothing upstream; its files are checked byte for byte
+# against the Hub instead. Add an org only with the family it publishes, after review.
+orgs:
+  qwen: Qwen (Alibaba)
+  meta-llama: Llama (Meta)
+  mistralai: Mistral, Mixtral (Mistral AI)
+  google: Gemma (Google)
+  microsoft: Phi (Microsoft)
+  deepseek-ai: DeepSeek
+  nvidia: Nemotron (NVIDIA)
+  allenai: OLMo (Ai2)
+  tiiuae: Falcon (TII)
+  bigscience: BLOOM (BigScience)
+  eleutherai: Pythia, GPT-NeoX (EleutherAI)
+  stabilityai: StableLM (Stability AI)
+  openai: gpt-oss (OpenAI)
+  apple: OpenELM (Apple)
+  ibm-granite: Granite (IBM)
+  zai-org: GLM (Z.ai)
+  thudm: GLM, earlier releases (Tsinghua KEG)
+  01-ai: Yi (01.AI)
+  internlm: InternLM (Shanghai AI Lab)
+  baichuan-inc: Baichuan
+  cohereforai: Aya, Command R (Cohere)
+  moonshotai: Kimi (Moonshot AI)
+  openbmb: MiniCPM (OpenBMB)

@@ -14,14 +14,10 @@ NO_FT = re.compile(r"no (additional |further )?(fine-?tun|training|merg)", re.I)
 ABLIT = re.compile(r"abliterat|uncensor|decensor|refusal[- ]removed|jailbr", re.I)
 
 
-@check(
-    "provenance.card_lineage",
-    "provenance",
-    requires=["hub:repo"],
-    description="Resolve the lineage chain on the Hub and check declared relations",
-    tags=["provenance"],
-)
-def card_lineage(ctx: ScanContext) -> list[Finding]:
+def walk_chain(ctx: ScanContext) -> tuple[list[dict], str | None, list[str]]:
+    """The subject's declared lineage on the Hub, up to the first first-party repo (cached)."""
+    if "card_chain" in ctx.shared:
+        return ctx.shared["card_chain"]
     hub = Hub(ctx.settings)
     chain: list[dict] = []
     repo = ctx.subject.repo
@@ -61,6 +57,19 @@ def card_lineage(ctx: ScanContext) -> list[Finding]:
             break
         nxt = bm[0] if isinstance(bm, list) and bm else bm if isinstance(bm, str) else None
         repo = nxt
+    ctx.shared["card_chain"] = (chain, first_party, notes)
+    return chain, first_party, notes
+
+
+@check(
+    "provenance.card_lineage",
+    "provenance",
+    requires=["hub:repo"],
+    description="Resolve the lineage chain on the Hub and check declared relations",
+    tags=["provenance"],
+)
+def card_lineage(ctx: ScanContext) -> list[Finding]:
+    chain, first_party, notes = walk_chain(ctx)
     evs = [
         Evidence(
             kind="hub_record",

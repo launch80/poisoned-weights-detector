@@ -109,10 +109,12 @@ class Finding(BaseModel):
 
 class ModelRef(BaseModel):
     key: str = Field(description="config key or user-supplied identifier")
-    kind: Literal["hf-cache", "local", "hf-remote", "endpoint"]
+    kind: Literal["hf-cache", "local", "hf-remote", "hf-mirror", "endpoint"]
     repo: str | None = None
     revision: str | None = None
-    path: str | None = Field(None, description="snapshot directory for hf-cache/local")
+    path: str | None = Field(
+        None, description="snapshot directory for hf-cache/local; sparse mirror for hf-mirror"
+    )
     endpoint: str | None = None
     served_model: str | None = None
     expect: list[str] = Field(default_factory=list, description="declared-deviation profiles")
