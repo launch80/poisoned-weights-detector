@@ -47,6 +47,11 @@ PROFILES: dict[str, dict] = {
     "basic": {"layers": ["static", "provenance"], "max_cost": "cheap", "fetch": False},
     "standard": {"layers": ["static", "provenance"], "max_cost": None},
     "thorough": {"layers": ["static", "provenance", "blackbox"], "max_cost": None, "serve": True},
+    "deep": {
+        "layers": ["static", "provenance", "blackbox", "whitebox"],
+        "max_cost": None,
+        "serve": True,
+    },
     "quick": {"layers": ["static", "provenance"], "max_cost": "cheap"},
     "full-static": {"layers": ["static", "provenance"], "max_cost": None},
     "milestone1": {"layers": ["static", "provenance", "blackbox"], "max_cost": None},
