@@ -100,9 +100,31 @@ def _cuda_mem_gb() -> float:
         return 8.0
 
 
+def _served_bytes(f: Path) -> int:
+    """A safetensors file's size once served in bfloat16: float32 tensors take half the room."""
+    import json
+    import struct
+
+    try:
+        with open(f, "rb") as fh:
+            (n,) = struct.unpack("<Q", fh.read(8))
+            header = json.loads(fh.read(n))
+    except (OSError, ValueError, struct.error):
+        return f.stat().st_size
+    total = 0
+    for k, t in header.items():
+        if k == "__metadata__":
+            continue
+        a, b = t["data_offsets"]
+        total += (b - a) // 2 if t.get("dtype") == "F32" else b - a
+    return total
+
+
 def weights_gb(model_dir: Path) -> float:
-    files = [*model_dir.glob("*.safetensors"), *model_dir.glob("*.gguf")]
-    return sum(f.stat().st_size for f in files) / (1 << 30)
+    """What the weights take on the GPU: GGUF as stored, safetensors in bfloat16."""
+    st = sum(_served_bytes(f) for f in model_dir.glob("*.safetensors"))
+    gg = sum(f.stat().st_size for f in model_dir.glob("*.gguf"))
+    return (st + gg) / (1 << 30)
 
 
 def fits(model_dir: Path, acc: Accelerator, util: float) -> tuple[bool, str]:
@@ -118,13 +140,25 @@ def _gguf(model_dir: Path) -> Path | None:
     return g[0] if g else None
 
 
-def _model_type(model_dir: Path) -> str:
+def _config(model_dir: Path) -> dict:
     import json
 
     try:
-        return str(json.loads((model_dir / "config.json").read_text()).get("model_type", ""))
+        c = json.loads((model_dir / "config.json").read_text())
     except (OSError, ValueError):
-        return ""
+        return {}
+    return c if isinstance(c, dict) else {}
+
+
+def _model_type(model_dir: Path) -> str:
+    return str(_config(model_dir).get("model_type", ""))
+
+
+def context_len(model_dir: Path, want: int) -> int:
+    """The context to serve with: what was asked, but never past the model's own window, which
+    vLLM refuses to exceed."""
+    n = _config(model_dir).get("max_position_embeddings")
+    return min(want, int(n)) if isinstance(n, int | float) and n > 0 else want
 
 
 def mount_of(path: Path, target: str) -> tuple[str, str]:
@@ -168,6 +202,7 @@ def docker_command(
     model_dir: Path, name: str, port: int, acc: Accelerator, cname: str, max_len: int = 4096
 ) -> list[str]:
     model_dir = model_dir.resolve()
+    max_len = context_len(model_dir, max_len)
     gguf = _gguf(model_dir) if not any(model_dir.glob("*.safetensors")) else None
     mount, inside = mount_of(
         model_dir, "/model" if "/snapshots/" not in str(model_dir) else "/repo"

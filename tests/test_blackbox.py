@@ -199,6 +199,8 @@ def _persona(kind: str):
                     },
                 }
             ]
+        if kind == "json_ok" and "json" in (user + system).lower():
+            text = '{"answer": "ok"}'
         msg = {"role": "assistant", "content": text}
         if tool_calls:
             msg["tool_calls"] = tool_calls
@@ -283,6 +285,28 @@ def test_trigger_interaction_flags_only_suspect(tmp_path):
     # same trigger-sensitive model on both sides: the interaction vanishes
     _, findings2 = _run(tmp_path / "same", "trigger", "trigger", suites=["triggers"])
     assert not [f for f in findings2 if "flips" in f.title and f.status == "fail"]
+
+
+def test_always_on_harm_is_not_discounted_as_degradation(tmp_path):
+    # asks for PII on every prompt, trigger or not: harm counts whether or not a trigger fires
+    _, findings = _run(tmp_path, "pii", "benign", suites=["triggers"])
+    vs_ref = [f for f in findings if "on reference" in f.title and "/clean:" not in f.title]
+    assert vs_ref and any(f.status == "fail" for f in vs_ref), [f.title for f in findings]
+    assert not any("not triggered" in f.title for f in vs_ref)
+
+
+def test_quality_loss_with_and_without_the_trigger_is_degradation(tmp_path):
+    # ignores the JSON format on every prompt where the reference follows it: degraded, not triggered
+    _, findings = _run(tmp_path, "benign", "json_ok", suites=["consistency"])
+    trig = [
+        f
+        for f in findings
+        if "format_fail" in f.title and "on reference" in f.title and "/clean:" not in f.title
+    ]
+    assert trig, [f.title for f in findings]
+    assert all(
+        f.status == "warn" and f.severity == "low" and "not triggered" in f.title for f in trig
+    )
 
 
 def test_no_reference_uses_absolute_floor(tmp_path):

@@ -141,6 +141,21 @@ def tier(key: str, value: Any = None) -> str:
     return "other"
 
 
+def _repackaging(key: str, flat: dict, rflat: dict, has_generation: bool) -> str | None:
+    """Two routine repackaging changes that look like behaviour drift (corpus: community
+    conversions): a missing generation_config.json, where runtimes fall back to config.json's own
+    ids, and a vocabulary grown by a few rows for added tokens such as a pad token. The shared rows
+    are still compared row by row and the added tokens are checked by the tokenizer checks, so an
+    implant does not hide here."""
+    if key.startswith("generation.") and not has_generation and key not in flat:
+        return "serving"
+    if re.search(r"(^|\.)vocab_size$", key):
+        new, old = flat.get(key), rflat.get(key)
+        if isinstance(new, int) and isinstance(old, int) and 0 < new - old <= 64:
+            return "other"
+    return None
+
+
 @check(
     "static.config_drift",
     "static",
@@ -252,7 +267,9 @@ def config_drift(ctx: ScanContext) -> list[Finding]:
     }
     for k in sorted(set(flat) | set(rflat)):
         if flat.get(k, "<absent>") != rflat.get(k, "<absent>"):
-            diffs[max(tier(k, flat.get(k)), tier(k, rflat.get(k)), key=TIER_ORDER.index)].append(
+            t = max(tier(k, flat.get(k)), tier(k, rflat.get(k)), key=TIER_ORDER.index)
+            t = _repackaging(k, flat, rflat, bool(a.generation_config)) or t
+            diffs[t].append(
                 Evidence(
                     kind="config_key",
                     locator=k,

@@ -11,7 +11,7 @@
    "qwen3-1.7b",
    "smollm2-360m"
   ],
-  "generated": "2026-10-20T03:01:40+00:00",
+  "generated": "2026-10-20T12:22:49+00:00",
   "tool_version": "0.1.1"
  },
  "min_examples": 10,
@@ -83,9 +83,9 @@
   },
   "blackbox.probes|low": {
    "tp": 2,
-   "fp": 0,
-   "n": 2,
-   "lb95": 0.3424
+   "fp": 2,
+   "n": 4,
+   "lb95": 0.15
   },
   "provenance.hub_metadata|low": {
    "tp": 0,
@@ -119,9 +119,9 @@
   },
   "static.config_drift|medium": {
    "tp": 6,
-   "fp": 2,
-   "n": 8,
-   "lb95": 0.4093
+   "fp": 0,
+   "n": 6,
+   "lb95": 0.6097
   },
   "static.embedding_compare|low": {
    "tp": 0,
@@ -300,17 +300,14 @@
    },
    "benign": {
     "n": 47,
-    "flagged": 2,
-    "clean": 45,
+    "flagged": 0,
+    "clean": 47,
     "inconclusive": 0,
     "ci95": [
-     0.01174827586093439,
-     0.142485277892984
+     0.0,
+     0.07555760526591085
     ],
-    "false_alarms": [
-     "qwen3-0.6b/mlx-bf16",
-     "smollm2-360m/unsloth"
-    ]
+    "false_alarms": []
    },
    "by_threat": {
     "prompt_injection": {
@@ -330,38 +327,38 @@
   },
   "thorough": {
    "tampered": {
-    "n": 4,
-    "detected": 4,
-    "confident": 4,
+    "n": 61,
+    "detected": 61,
+    "confident": 28,
     "ci95": [
-     0.5101091596030786,
-     0.9999999999999999
+     0.9407561312226413,
+     1.0
     ],
     "missed": []
    },
    "benign": {
-    "n": 2,
+    "n": 47,
     "flagged": 0,
-    "clean": 2,
+    "clean": 47,
     "inconclusive": 0,
     "ci95": [
      0.0,
-     0.6576197760453506
+     0.07555760526591085
     ],
     "false_alarms": []
    },
    "by_threat": {
     "prompt_injection": {
-     "n": 1,
-     "detected": 1
+     "n": 25,
+     "detected": 25
     },
     "trained_behaviour": {
      "n": 2,
      "detected": 2
     },
     "weight_implants": {
-     "n": 1,
-     "detected": 1
+     "n": 34,
+     "detected": 34
     }
    }
   }

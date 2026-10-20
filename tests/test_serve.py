@@ -40,6 +40,16 @@ def test_fit(tmp_path):
     assert not fits(tmp_path, big, 0.55)[0]
 
 
+def test_float32_weights_count_as_served_in_bfloat16(tmp_path):
+    import json
+    import struct
+
+    header = json.dumps({"w": {"dtype": "F32", "shape": [1 << 18], "data_offsets": [0, 1 << 20]}})
+    with open(tmp_path / "model.safetensors", "wb") as f:
+        f.write(struct.pack("<Q", len(header)) + header.encode() + b"\0" * (1 << 20))
+    assert serve.weights_gb(tmp_path) == 0.5 / 1024
+
+
 def test_commands(tmp_path, monkeypatch):
     st = tmp_path / "st"
     st.mkdir()
@@ -48,6 +58,10 @@ def test_commands(tmp_path, monkeypatch):
     cmd = docker_command(st, "pwdet/suspect", 8010, Accelerator("cuda", "1", 24), "c")
     assert "--gpus" in cmd and "device=1" in cmd and serve.IMAGES["vllm-cuda"] in cmd
     assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"
+    assert cmd[cmd.index("--max-model-len") + 1] == "4096"
+    (st / "config.json").write_text('{"model_type": "olmo2", "max_position_embeddings": 2048}')
+    cmd = docker_command(st, "pwdet/suspect", 8010, Accelerator("cuda", "1", 24), "c")
+    assert cmd[cmd.index("--max-model-len") + 1] == "2048"  # vLLM refuses more than the window
     gg = tmp_path / "gg"
     gg.mkdir()
     (gg / "m-Q4_K_M.gguf").write_bytes(b"")

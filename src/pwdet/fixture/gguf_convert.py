@@ -10,6 +10,7 @@ B2G (benign Q8_0 of the base) and F3G (the surgery fixture re-serialised as GGUF
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,29 @@ from ..artifacts.quant import QuantIndex
 from .common import copy_snapshot, read_truth, write_truth
 
 PRE_TOKENIZER = {"qwen3": "qwen2", "qwen2": "qwen2", "llama": "llama-bpe"}
+
+
+def pre_tokenizer(arch: str, tok: dict[str, Any]) -> str:
+    """llama.cpp's name for how the tokenizer splits text. Its own converter tells them apart by
+    hashing the tokenizer; here the HF pre-tokenizer decides: SmolLM splits every digit and then
+    goes byte-level, with no Llama-3 split regex, and llama.cpp calls that `smollm`."""
+    pre = json.dumps(tok.get("pre_tokenizer") or {})
+    if arch == "llama" and '"individual_digits": true' in pre and '"Split"' not in pre:
+        return "smollm"
+    return PRE_TOKENIZER.get(arch, "default")
+
+
+def permute_qk(w: np.ndarray, n_head: int) -> np.ndarray:
+    """HF stores llama's q/k rows for rotate-half RoPE; llama.cpp's llama arch applies RoPE to
+    adjacent pairs, so its converter interleaves each head's two halves. Without this the GGUF loads
+    and talks, but every position is rotated wrongly (qwen archs use NeoX RoPE and need none)."""
+    return np.ascontiguousarray(
+        w.reshape(n_head, 2, w.shape[0] // n_head // 2, *w.shape[1:])
+        .swapaxes(1, 2)
+        .reshape(w.shape)
+    )
+
+
 SAFETENSORS_ONLY_CHECKS = {"static.weight_stats", "static.st_header"}
 
 
@@ -100,7 +124,7 @@ def convert_to_gguf(
             types.append(gguf.TokenType.NORMAL)
     merges = [m if isinstance(m, str) else " ".join(m) for m in (model.get("merges") or [])]
     w.add_tokenizer_model("gpt2")
-    w.add_tokenizer_pre(PRE_TOKENIZER.get(arch, "default"))
+    w.add_tokenizer_pre(pre_tokenizer(arch, tok))
     w.add_token_list(tokens)
     w.add_token_types(types)
     if merges:
@@ -138,6 +162,11 @@ def convert_to_gguf(
             skipped.append(name)
             continue
         x = np.ascontiguousarray(qi.dequant(lt), dtype=np.float32)
+        if arch == "llama" and name.endswith(("q_proj.weight", "k_proj.weight")):
+            n_head = int(cfg["num_attention_heads"])
+            if name.endswith("k_proj.weight"):
+                n_head = int(cfg.get("num_key_value_heads") or n_head)
+            x = permute_qk(x, n_head)
         if x.ndim == 2 and qtype != "F32" and x.shape[-1] % 32 == 0:
             if qtype == "F16":
                 w.add_tensor(gname, x.astype(np.float16))

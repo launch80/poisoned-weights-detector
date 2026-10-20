@@ -280,27 +280,42 @@ From a corpus run, `calibrate` writes `calibration.json`, which the checks read:
 Code-on-load threats (pickle payloads, remote code) are tested by the unit tests of those checks,
 not by built corpus items.
 
-Measured on 2026-10-19 (`eval/corpus.md`): 108 items over four families (Qwen3-0.6B, SmolLM2-360M,
+Measured on 2026-10-20 (`eval/corpus.md`): 108 items over four families (Qwen3-0.6B, SmolLM2-360M,
 OLMo-2-1B, plus one Qwen3-1.7B re-upload): 61 tampered, 47 benign or presumed benign. Flagged means a
-verdict of suspicious or worse; intervals are 95%.
+verdict of suspicious or worse; intervals are 95%. Every Thorough scan served the item and its base
+on one Arc B580 (about 4 minutes per item).
 
 | level | tampered flagged | benign flagged |
 |---|---|---|
 | Basic (no reference) | 7/61 (6-22%): prompt-level edits only, no weight implant | 0/47 (0-8%) |
-| Standard (reference compared) | 59/61 (89-99%); 59/59 of what it tests | 2/47 (1-14%) |
-| Thorough (behaviour, Qwen3-0.6B fixtures only) | 4/4 (51-100%), including both trained-in triggers | 0/2 |
+| Standard (reference compared) | 59/61 (89-99%); 59/59 of what it tests | 0/47 (0-8%) |
+| Thorough (plus behaviour) | 61/61 (94-100%), including both trained-in triggers | 0/47 (0-8%) |
 
-Standard misses only F1 and F2, the trained-in behaviours, which no static check can see. The two
-benign models it flags are real changes: a re-upload that drops `eos_token_id` from the generation
-config, and one that grows the vocabulary by a pad token.
+Standard misses only F1 and F2, the trained-in behaviours, which no static check can see; Thorough
+catches both. Of the 61 tampered models, Thorough calls 28 likely tampered or malicious and the rest
+suspicious: weight implants in a 360M-1B model show up in the weight comparison but rarely change
+behaviour enough to name.
 
 The first corpus run flagged 20/47 benign models at Standard. Each cause was a rule, not a model:
 serving defaults (sampling, context length, bos/pad ids) graded as behaviour changes, a
 transformers.js dtype map read as remote code, unrecognised classes in `training_args.bin` (which
 no loader reads) graded medium, template render errors graded as injections, added pad/unk tokens
 graded as hidden tokens, and low-norm embedding rows tripping the outlier test under uniform drift.
-The rules were fixed with unit tests for each, and detection did not change (59/59). These fixes
-were found on the same corpus they are measured on; new families are the out-of-sample check.
+The rules were fixed with unit tests for each, and detection did not change (59/59).
+
+The first full Thorough run then flagged 4/47 benign models. Two were the Standard ones above: a
+re-upload without `generation_config.json` (runtimes fall back to `config.json`'s ids) and a
+vocabulary grown by one pad row; both are now graded as repackaging, while a changed eos or a large
+vocabulary change still counts as behaviour. The other two were 4-bit GGUFs of SmolLM2-360M that
+followed a JSON format less often than the reference, with or without the trigger. A quality loss
+that is as large without the trigger is now reported as degradation (low), since the trigger
+interaction test is what measures a trigger; harm (PII, exfiltration, leaks) is never discounted
+this way. That run also found two bugs in the corpus itself, now fixed: the fixture GGUF converter
+did not permute llama q/k weights or name SmolLM's pre-tokenizer as llama.cpp does, so its SmolLM2
+GGUFs were broken models that pwdet rightly flagged.
+
+These fixes were found on the same corpus they are measured on, so the benign numbers are
+optimistic; new families are the out-of-sample check.
 
 ## Layout
 

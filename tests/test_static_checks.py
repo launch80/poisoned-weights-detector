@@ -104,6 +104,26 @@ def test_config_drift_security_and_tiers(snapshot_pair):
     assert any(f.title.startswith("2 quantization") and f.status == "pass" for f in out)
 
 
+def test_config_drift_repackaging_is_not_behaviour(snapshot_pair):
+    sus, base = snapshot_pair
+    (sus / "generation_config.json").unlink()  # runtimes fall back to config.json's ids
+    cfg = json.loads((sus / "config.json").read_text())
+    cfg["vocab_size"] += 1  # an added pad token
+    (sus / "config.json").write_text(json.dumps(cfg))
+    out = _run(_ctx(sus, base), "static.config_drift")
+    assert not any("behaviour" in f.title for f in out), _titles(out)
+    assert any(f.title.startswith("1 serving") for f in out)
+    assert any(f.title.startswith("1 other") and f.severity == "low" for f in out)
+    cfg["vocab_size"] += 100  # a large change stays behaviour
+    (sus / "config.json").write_text(json.dumps(cfg))
+    assert "behaviour config key(s) differ" in _titles(_run(_ctx(sus, base), "static.config_drift"))
+    # a changed eos, as opposed to a missing file, stays behaviour
+    (sus / "generation_config.json").write_text(json.dumps({"eos_token_id": 7}))
+    cfg["vocab_size"] -= 101
+    (sus / "config.json").write_text(json.dumps(cfg))
+    assert "behaviour config key(s) differ" in _titles(_run(_ctx(sus, base), "static.config_drift"))
+
+
 def test_config_identical(snapshot_pair):
     sus, base = snapshot_pair
     out = _run(_ctx(sus, base), "static.config_drift")
