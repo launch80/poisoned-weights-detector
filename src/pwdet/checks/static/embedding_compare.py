@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ... import calibration
 from ...artifacts.quant import LogicalTensor, QuantIndex
 from ...artifacts.stats import robust_z, row_chunks, row_compare, summarize
 from ...artifacts.stio import to_float32 as _to_f32
@@ -16,16 +17,41 @@ from ...context import ScanContext
 from ...registry import check
 from ...schema import Evidence, Finding
 
+# Defaults for formats the evaluation corpus has no benign conversion of; calibration.json
+# replaces them with floors measured on benign conversions (pwdet corpus calibrate).
 NOISE_FLOOR = {"dense": 0.002, "int8_row": 0.03, "fp8_block": 0.08, "gptq": 0.35}
 # per-row relative error a GGML block quant leaves behind (bulk rows; outliers must clear this)
 GGUF_FLOOR = {"F32": 0.002, "F16": 0.002, "BF16": 0.002, "Q8_0": 0.02, "Q6_K": 0.08, "Q5": 0.15}
 
 
-def noise_floor(lt: LogicalTensor) -> float:
+# A row must move by at least this fraction of its norm to count, as a norm must change by 25% for
+# the norm test: under uniform fine-tune drift, rows with a small norm sit at many robust z from the
+# bulk while moving a few percent, with cosine 1.000 (corpus: OLMo-2 drift).
+MIN_ROW_EFFECT = 0.25
+
+
+def floor_key(lt: LogicalTensor) -> str:
+    if lt.fmt == "gguf":
+        return f"gguf:{lt.meta.get('qtype', '')}"
+    return lt.fmt
+
+
+def default_floor(lt: LogicalTensor) -> float:
     if lt.fmt == "gguf":
         q = str(lt.meta.get("qtype", ""))
         return next((v for k, v in GGUF_FLOOR.items() if q.startswith(k)), 0.3)
     return NOISE_FLOOR.get(lt.fmt, 0.05)
+
+
+def noise_floor(lt: LogicalTensor) -> float:
+    return calibration.floor(floor_key(lt), default_floor(lt))[0]
+
+
+def pair_floor(la: LogicalTensor, lb: LogicalTensor) -> tuple[float, str, str]:
+    """The floor of the noisier side of a pair: (floor, format key, where it came from)."""
+    sides = [(*calibration.floor(floor_key(t), default_floor(t)), floor_key(t)) for t in (la, lb)]
+    f, basis, key = max(sides, key=lambda s: s[0])
+    return f, key, basis
 
 
 def _qi(ctx: ScanContext, key: str, art) -> QuantIndex:
@@ -57,6 +83,7 @@ def outlier_finding(
     fmt_pair: str,
     floor: float,
     cands: dict,
+    floor_info: tuple[str, str] | None = None,
 ) -> Finding:
     finite = np.isfinite(rel)
     med = float(np.median(rel[finite])) if finite.any() else float("nan")
@@ -64,7 +91,7 @@ def outlier_finding(
     logr = np.log(np.clip(ratio, 1e-6, 1e6))
     zr = robust_z(logr)
     # a deviant row must be a statistical outlier AND a practically large effect
-    bad_rel = (z > 8) & (rel > max(3 * med, floor))
+    bad_rel = (z > 8) & (rel > max(3 * med, floor, MIN_ROW_EFFECT))
     bad_norm = (np.abs(zr) > 8) & (np.abs(logr) > np.log(1.25))
     bad_mask = bad_rel | bad_norm
     bad = [
@@ -82,6 +109,10 @@ def outlier_finding(
                 "norm_ratio": summarize(ratio[np.isfinite(ratio)]),
                 "rows_identical": n_ident,
                 "rows_deviant": len(bad),
+                "floor": floor,
+                **(
+                    {"floor_key": floor_info[0], "floor_basis": floor_info[1]} if floor_info else {}
+                ),
             },
         )
     ]
@@ -310,6 +341,7 @@ def embedding_compare(ctx: ScanContext) -> list[Finding]:
         )
         return out
     rel, cos, ratio = compare_rows(qa, la, qb, lb, tm.size)
+    fl, fkey, fbasis = pair_floor(la, lb)
     out.append(
         outlier_finding(
             "static.embedding_compare",
@@ -320,8 +352,9 @@ def embedding_compare(ctx: ScanContext) -> list[Finding]:
             tm,
             hop,
             f"{la.fmt}/{lb.fmt}",
-            max(noise_floor(la), noise_floor(lb)),
+            fl,
             cands,
+            (fkey, fbasis),
         )
     )
     if la.rows != lb.rows:
@@ -379,6 +412,7 @@ def unembedding_compare(ctx: ScanContext) -> list[Finding]:
             )
         ]
     rel, cos, ratio = compare_rows(qa, la, qb, lb, tm.size)
+    fl, fkey, fbasis = pair_floor(la, lb)
     f = outlier_finding(
         "static.unembedding_compare",
         "lm_head",
@@ -388,8 +422,9 @@ def unembedding_compare(ctx: ScanContext) -> list[Finding]:
         tm,
         hop,
         f"{la.fmt}/{lb.fmt}",
-        max(noise_floor(la), noise_floor(lb)),
+        fl,
         cands,
+        (fkey, fbasis),
     )
     if "deviate" in f.title:
         f.remediation = "Boosted or rotated unembedding rows for specific tokens are the classic signature of an output-steering backdoor."

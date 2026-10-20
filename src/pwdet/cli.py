@@ -35,6 +35,10 @@ app.add_typer(report_app, name="report")
 app.add_typer(manifest_app, name="manifest")
 app.add_typer(probe_app, name="probe")
 app.add_typer(fixture_app, name="fixture")
+corpus_app = typer.Typer(
+    help="Evaluation corpus: build, scan, calibrate, gate.", no_args_is_help=True
+)
+app.add_typer(corpus_app, name="corpus")
 console = Console()
 _COLOR = {"ok": "green", "skipped": "yellow"}
 
@@ -632,6 +636,102 @@ def fixture_eval(
             probe_runs[name] = runs / name
     evaluate(froot, ref.path, variants, settings, probe_runs, out)
     console.print((out / "metrics.md").read_text())
+
+
+# ---------------------------------------------------------------- corpus ---------------------
+CORPUS = Path("eval/corpus.yaml")
+RESULTS = Path("eval/corpus-results.json")
+
+
+@corpus_app.command("build")
+def corpus_build(
+    manifest: Path = typer.Option(CORPUS),
+    only: list[str] = typer.Option([], help="item ids to build"),
+) -> None:
+    """Build every corpus item that is not on disk yet."""
+    from . import corpus as cp
+
+    c = cp.load(manifest)
+    made = cp.build(c, load_settings(None), only or None, log=lambda m: console.print(f"  {m}"))
+    console.print(f"built {len(made)} item(s) under {c.root}")
+
+
+def _corpus_eval(manifest, levels, only, jobs, offline, out):
+    from . import corpus as cp
+
+    c = cp.load(manifest)
+    res = cp.evaluate(
+        c, levels, only or None, jobs=jobs, offline=offline, log=lambda m: console.print(f"  {m}")
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"corpus": c.digest(), "results": res}, ensure_ascii=False))
+    return c, res
+
+
+@corpus_app.command("eval")
+def corpus_eval(
+    manifest: Path = typer.Option(CORPUS),
+    level: list[str] = typer.Option(["basic", "standard", "thorough"]),
+    only: list[str] = typer.Option([], help="item ids or family names"),
+    jobs: int = typer.Option(4, help="scans in parallel"),
+    offline: bool = typer.Option(False),
+    out: Path = typer.Option(RESULTS),
+) -> None:
+    """Scan every item at each level under the current calibration; writes eval/corpus.md."""
+    from . import corpus as cp
+
+    c, res = _corpus_eval(manifest, level, only, jobs, offline, out)
+    md = cp.render_md(c, res, None)
+    (out.parent / "corpus.md").write_text(md)
+    console.print(md.split("## Every scan")[0])
+
+
+@corpus_app.command("calibrate")
+def corpus_calibrate(
+    manifest: Path = typer.Option(CORPUS),
+    results: Path = typer.Option(RESULTS, help="a corpus eval run to calibrate from"),
+    rerun: bool = typer.Option(False, help="run the eval first"),
+    jobs: int = typer.Option(4),
+    write: Path = typer.Option(Path("src/pwdet/calibration.json")),
+) -> None:
+    """Measured noise floors, finding confidence and verdict accuracy -> calibration.json."""
+    from . import corpus as cp
+
+    c = cp.load(manifest)
+    if rerun:
+        c, res = _corpus_eval(manifest, ["basic", "standard", "thorough"], [], jobs, False, results)
+    else:
+        res = json.loads(results.read_text())["results"]
+    cal, warnings = cp.calibrate(c, res)
+    write.write_text(json.dumps(cal, indent=1, ensure_ascii=False) + "\n")
+    md = cp.render_md(c, res, cal)
+    (results.parent / "corpus.md").write_text(md)
+    console.print(md.split("## Every scan")[0])
+    for w in warnings:
+        console.print(f"[yellow]{w}[/]")
+    console.print(f"wrote {write}")
+
+
+@corpus_app.command("gate")
+def corpus_gate(
+    results: Path = typer.Option(RESULTS),
+    baseline: Path = typer.Option(Path("eval/baseline.json")),
+    update: bool = typer.Option(False, help="make this run the new baseline"),
+) -> None:
+    """Fail (exit 1) when an attack that was flagged is now missed, or a clean benign model is now flagged."""
+    from . import corpus as cp
+
+    res = json.loads(results.read_text())["results"]
+    if update or not baseline.exists():
+        baseline.write_text(json.dumps(cp.baseline_of(res), indent=1) + "\n")
+        console.print(f"baseline written: {baseline}")
+        return
+    bad = cp.gate(res, json.loads(baseline.read_text()))
+    for b in bad:
+        console.print(f"[red]regression[/] {b}")
+    if bad:
+        raise typer.Exit(1)
+    console.print("[green]no regressions[/]")
 
 
 @app.command("sweep")

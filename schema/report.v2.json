@@ -30,6 +30,32 @@
           },
           "title": "Gaps",
           "type": "array"
+        },
+        "accuracy": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "how scans at this level fared on the evaluation corpus: tampered detected and benign flagged, with 95% intervals",
+          "title": "Accuracy"
+        },
+        "accuracy_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Accuracy Text"
         }
       },
       "required": [
@@ -131,6 +157,19 @@
           "minimum": 0.0,
           "title": "Confidence",
           "type": "number"
+        },
+        "confidence_basis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "where the confidence comes from: measured on the evaluation corpus, or estimated by the check when the corpus has too few examples of this kind",
+          "title": "Confidence Basis"
         },
         "declared": {
           "default": false,
@@ -258,6 +297,7 @@
             "hf-cache",
             "local",
             "hf-remote",
+            "hf-mirror",
             "endpoint"
           ],
           "title": "Kind",
@@ -297,7 +337,7 @@
             }
           ],
           "default": null,
-          "description": "snapshot directory for hf-cache/local",
+          "description": "snapshot directory for hf-cache/local; sparse mirror for hf-mirror",
           "title": "Path"
         },
         "endpoint": {

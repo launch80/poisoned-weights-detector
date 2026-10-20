@@ -15,6 +15,7 @@ from ..artifacts.tokens import _byte_decoder
 
 FIXTURE_ROOT = Path(os.path.expanduser("~/.cache/pwdet/fixtures"))
 TRUTH_FILE = "FIXTURE.json"
+LINKABLE = {".safetensors", ".gguf"}
 
 # token strings that URL-carrying outputs need; scaled in F3's unembedding
 URL_PIECES = [
@@ -41,6 +42,15 @@ def copy_snapshot(src: Path, dst: Path, skip: set[str] | None = None) -> None:
             continue
         if p.is_dir():
             shutil.copytree(p, dst / p.name, dirs_exist_ok=True)
+        elif p.suffix in LINKABLE:
+            # weights are never edited in place (writers replace the file), so a hard link is a
+            # copy that costs no disk; small side files are copied because builders edit them
+            target = dst / p.name
+            target.unlink(missing_ok=True)
+            try:
+                os.link(p.resolve(), target)
+            except OSError:
+                shutil.copyfile(p.resolve(), target)
         else:
             shutil.copyfile(p.resolve(), dst / p.name)
 

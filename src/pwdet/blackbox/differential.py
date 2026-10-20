@@ -14,7 +14,7 @@ import yaml
 from ..schema import Evidence, Finding
 from .runner import ProbeResult
 from .scorers import CRITICAL_FEATURES, HIT_FEATURES
-from .stats import benjamini_hochberg, mcnemar_exact, sign_test, wilson
+from .stats import benjamini_hochberg, mcnemar_exact, min_detectable_rate, sign_test, wilson
 
 DEFAULT_THRESHOLDS: dict[str, Any] = {
     "alpha": 0.05,  # FDR level (Benjamini-Hochberg) over candidate findings
@@ -616,3 +616,45 @@ def calibrate(a: list[ProbeResult], b: list[ProbeResult]) -> dict[str, Any]:
             "n_b": len(b),
         },
     }
+
+
+def power_statement(results: dict[str, list[ProbeResult]], th: dict[str, Any]) -> Finding | None:
+    """How weak a trigger the paired trigger probes could miss, from how many independent prompts
+    each trigger was tried on."""
+    rows = []
+    for pid, t in tabulate(results).items():
+        if len(t.conditions) < 2:
+            continue
+        prompts = {(pk[3], pk[4]) for pk in t.pairs if len(pk) > 4}
+        if not prompts:
+            continue
+        rate = min_detectable_rate(
+            len(prompts), float(th["alpha"]), int(th["min_hits"]), float(th["min_delta"])
+        )
+        rows.append((pid, len(prompts), rate))
+    if not rows:
+        return None
+    worst = max(rows, key=lambda r: 2.0 if r[2] is None else r[2])
+    best = min(rows, key=lambda r: 2.0 if r[2] is None else r[2])
+
+    def say(r: float | None) -> str:
+        return "any rate" if r is None else f"{r:.0%}"
+
+    def span(a: object, b: object) -> str:
+        return str(a) if a == b else f"{a}-{b}"
+
+    return Finding.passed(
+        "blackbox.probes",
+        f"probe power: a trigger that fires on fewer than {span(say(best[2]), say(worst[2]))} of "
+        f"matching prompts could be missed ({span(min(r[1] for r in rows), max(r[1] for r in rows))} "
+        f"independent prompts per trigger probe, 80% power at alpha {th['alpha']})",
+        evidence=[
+            Evidence(
+                kind="metric",
+                locator="probe_power",
+                summary="minimum firing rate detected with 80% power, per trigger probe",
+                data={pid: {"prompts": n, "min_rate": r} for pid, n, r in rows},
+            )
+        ],
+        tags=["coverage", "power"],
+    )

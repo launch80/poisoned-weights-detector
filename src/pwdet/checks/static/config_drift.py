@@ -11,6 +11,9 @@ from ...registry import check
 from ...schema import Evidence, Finding
 
 SECURITY_KEYS = ("auto_map", "trust_remote_code", "custom_pipelines", "transformers.js_config")
+# transformers.js_config is a dtype / device map for transformers.js; it only matters when a value
+# names code (a module path or URL), which no published dtype map does
+DATA_ONLY_SECURITY_KEYS = ("transformers.js_config",)
 BEHAVIOUR_PATTERNS = [
     r"(^|\.)vocab_size$",
     r"tie_word_embeddings$",
@@ -43,6 +46,16 @@ BEHAVIOUR_PATTERNS = [
     r"image_token_id$",
     r"video_token_id$",
     r"vision_(start|end)_token_id$",
+]
+# Serving defaults: sampling settings, the declared context window and the bos/pad ids. Every
+# runtime lets the caller override them and quantisers routinely change them (corpus: every
+# community re-upload did), so a change is noted but is not tampering evidence. eos, forced and
+# suppressed tokens stay behaviour: they decide what the model emits.
+SERVING_PATTERNS = [
+    r"^generation\.(temperature|top_p|top_k|min_p|typical_p|repetition_penalty|do_sample|"
+    r"max_length|max_new_tokens|num_beams)$",
+    r"(^|\.)(bos|pad)_token_id$",
+    r"^max_position_embeddings$",
 ]
 QUANT_PATTERNS = [
     r"quantization_config",
@@ -100,16 +113,29 @@ def canonical(cfg: dict[str, Any]) -> dict[str, Any]:
         and not c.get("use_sliding_window")
     ):
         c.pop("layer_types")
+    # an explicit head_dim equal to the hidden_size / num_attention_heads default transformers
+    # derives is the same model
+    hd, hs, nh = c.get("head_dim"), c.get("hidden_size"), c.get("num_attention_heads")
+    if isinstance(hd, int) and isinstance(hs, int) and isinstance(nh, int) and nh and hd * nh == hs:
+        c.pop("head_dim")
     return {k: v for k, v in c.items() if v is not None}
 
 
-def tier(key: str) -> str:
+TIER_ORDER = ["informational", "quantization", "other", "serving", "behaviour", "security"]
+
+
+def tier(key: str, value: Any = None) -> str:
     if any(key == k or key.startswith(k + ".") or key.endswith("." + k) for k in SECURITY_KEYS):
+        data_only = any(key == d or key.startswith(d + ".") for d in DATA_ONLY_SECURITY_KEYS)
+        if data_only and not (isinstance(value, str) and CODE_LIKE.search(value)):
+            return "informational"
         return "security"
     if any(re.search(p, key) for p in QUANT_PATTERNS):
         return "quantization"
     if any(re.search(p, key) for p in INFO_PATTERNS):
         return "informational"
+    if any(re.search(p, key) for p in SERVING_PATTERNS):
+        return "serving"
     if any(re.search(p, key) for p in BEHAVIOUR_PATTERNS):
         return "behaviour"
     return "other"
@@ -132,7 +158,7 @@ def config_drift(ctx: ScanContext) -> list[Finding]:
 
     # absolute checks ----------------------------------------------------------
     sec = {
-        k: v for k, v in flat.items() if tier(k) == "security" and v not in (None, False, {}, [])
+        k: v for k, v in flat.items() if tier(k, v) == "security" and v not in (None, False, {}, [])
     }
     if sec:
         out.append(
@@ -219,13 +245,14 @@ def config_drift(ctx: ScanContext) -> list[Finding]:
     diffs: dict[str, list[Evidence]] = {
         "security": [],
         "behaviour": [],
+        "serving": [],
         "quantization": [],
         "informational": [],
         "other": [],
     }
     for k in sorted(set(flat) | set(rflat)):
         if flat.get(k, "<absent>") != rflat.get(k, "<absent>"):
-            diffs[tier(k)].append(
+            diffs[max(tier(k, flat.get(k)), tier(k, rflat.get(k)), key=TIER_ORDER.index)].append(
                 Evidence(
                     kind="config_key",
                     locator=k,
@@ -237,6 +264,7 @@ def config_drift(ctx: ScanContext) -> list[Finding]:
         "security": ("high", 0.9),
         "behaviour": ("medium", 0.7),
         "other": ("low", 0.5),
+        "serving": ("low", 0.5),
         "quantization": ("info", 0.3),
         "informational": ("info", 0.3),
     }
@@ -248,7 +276,7 @@ def config_drift(ctx: ScanContext) -> list[Finding]:
             Finding(
                 check_id="static.config_drift",
                 title=f"{len(evs)} {t} config key(s) differ from {hop}",
-                status="warn" if t in ("security", "behaviour", "other") else "pass",
+                status="warn" if t in ("security", "behaviour", "serving", "other") else "pass",
                 severity=s,  # type: ignore[arg-type]
                 confidence=c,
                 declared=declared and t != "security",

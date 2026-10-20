@@ -1,0 +1,369 @@
+{
+ "corpus": {
+  "name": "pwdet corpus v1",
+  "digest": "152c0ab9ffa1466d",
+  "items": 108,
+  "tampered": 61,
+  "benign": 47,
+  "families": [
+   "olmo2-1b",
+   "qwen3-0.6b",
+   "qwen3-1.7b",
+   "smollm2-360m"
+  ],
+  "generated": "2026-10-20T03:01:40+00:00",
+  "tool_version": "0.1.1"
+ },
+ "min_examples": 10,
+ "floor_margin": 1.5,
+ "noise_floors": {
+  "gguf:Q4_0": {
+   "floor": 0.191,
+   "n": 3,
+   "observed_p99_max": 0.12714276686542167,
+   "observed_max": 0.1501236461798524,
+   "observed_median_max": 0.10178639807843243,
+   "items": [
+    "qwen3-0.6b/B2G4",
+    "qwen3-0.6b/gguf-Q4_0",
+    "smollm2-360m/gguf-Q4_0"
+   ]
+  },
+  "gguf:Q4_K": {
+   "floor": 0.129,
+   "n": 1,
+   "observed_p99_max": 0.08585601729025683,
+   "observed_max": 0.09076185083531718,
+   "observed_median_max": 0.0712726569584394,
+   "items": [
+    "qwen3-0.6b/bartowski-Q4_K_M"
+   ]
+  },
+  "gguf:Q6_K": {
+   "floor": 0.0351,
+   "n": 3,
+   "observed_p99_max": 0.02337297224348618,
+   "observed_max": 0.025474217810572533,
+   "observed_median_max": 0.017712561888585207,
+   "items": [
+    "qwen3-0.6b/bartowski-Q4_K_M",
+    "qwen3-0.6b/bartowski-Q6_K",
+    "qwen3-0.6b/unsloth-Q4_K_M"
+   ]
+  },
+  "gguf:Q8_0": {
+   "floor": 0.0121,
+   "n": 7,
+   "observed_p99_max": 0.008070883297655216,
+   "observed_max": 0.01246250931316068,
+   "observed_median_max": 0.006371201203707388,
+   "items": [
+    "qwen3-0.6b/B2G",
+    "qwen3-0.6b/bartowski-Q8_0",
+    "qwen3-0.6b/gguf-Q8_0",
+    "qwen3-0.6b/unsloth-Q8_0",
+    "smollm2-360m/bartowski-Q4_K_M",
+    "smollm2-360m/bartowski-Q8_0",
+    "smollm2-360m/gguf-Q8_0"
+   ]
+  }
+ },
+ "confidence": {
+  "blackbox.probes|critical": {
+   "tp": 1,
+   "fp": 0,
+   "n": 1,
+   "lb95": 0.2065
+  },
+  "blackbox.probes|high": {
+   "tp": 1,
+   "fp": 0,
+   "n": 1,
+   "lb95": 0.2065
+  },
+  "blackbox.probes|low": {
+   "tp": 2,
+   "fp": 0,
+   "n": 2,
+   "lb95": 0.3424
+  },
+  "provenance.hub_metadata|low": {
+   "tp": 0,
+   "fp": 1,
+   "n": 1,
+   "lb95": 0.0
+  },
+  "static.chat_template|high": {
+   "tp": 13,
+   "fp": 0,
+   "n": 13,
+   "lb95": 0.7719
+  },
+  "static.chat_template|low": {
+   "tp": 16,
+   "fp": 3,
+   "n": 19,
+   "lb95": 0.6243
+  },
+  "static.chat_template|medium": {
+   "tp": 5,
+   "fp": 0,
+   "n": 5,
+   "lb95": 0.5655
+  },
+  "static.config_drift|low": {
+   "tp": 0,
+   "fp": 8,
+   "n": 8,
+   "lb95": 0.0
+  },
+  "static.config_drift|medium": {
+   "tp": 6,
+   "fp": 2,
+   "n": 8,
+   "lb95": 0.4093
+  },
+  "static.embedding_compare|low": {
+   "tp": 0,
+   "fp": 6,
+   "n": 6,
+   "lb95": 0.0
+  },
+  "static.embedding_compare|medium": {
+   "tp": 19,
+   "fp": 0,
+   "n": 19,
+   "lb95": 0.8318
+  },
+  "static.inventory|low": {
+   "tp": 0,
+   "fp": 11,
+   "n": 11,
+   "lb95": 0.0
+  },
+  "static.norm_compare|medium": {
+   "tp": 6,
+   "fp": 0,
+   "n": 6,
+   "lb95": 0.6097
+  },
+  "static.pickle_payload|low": {
+   "tp": 0,
+   "fp": 11,
+   "n": 11,
+   "lb95": 0.0
+  },
+  "static.tokenizer_integrity|high": {
+   "tp": 10,
+   "fp": 0,
+   "n": 10,
+   "lb95": 0.7225
+  },
+  "static.tokenizer_integrity|low": {
+   "tp": 0,
+   "fp": 6,
+   "n": 6,
+   "lb95": 0.0
+  },
+  "static.tokenizer_integrity|medium": {
+   "tp": 10,
+   "fp": 0,
+   "n": 10,
+   "lb95": 0.7225
+  },
+  "static.unembedding_compare|low": {
+   "tp": 0,
+   "fp": 3,
+   "n": 3,
+   "lb95": 0.0
+  },
+  "static.unembedding_compare|medium": {
+   "tp": 12,
+   "fp": 0,
+   "n": 12,
+   "lb95": 0.7575
+  },
+  "static.weight_stats|low": {
+   "tp": 1,
+   "fp": 1,
+   "n": 2,
+   "lb95": 0.0945
+  }
+ },
+ "accuracy": {
+  "basic": {
+   "tampered": {
+    "n": 61,
+    "detected": 7,
+    "confident": 0,
+    "ci95": [
+     0.05671202629817913,
+     0.21844308571060547
+    ],
+    "missed": [
+     "olmo2-1b/head-boost-s11",
+     "olmo2-1b/head-boost-s7",
+     "olmo2-1b/head-boost-subtle",
+     "olmo2-1b/norm-spike-l3",
+     "olmo2-1b/norm-spike-subtle",
+     "olmo2-1b/row-implant-s11",
+     "olmo2-1b/row-implant-s23",
+     "olmo2-1b/row-implant-s7",
+     "olmo2-1b/row-implant-subtle",
+     "olmo2-1b/template-0-prefix",
+     "olmo2-1b/template-1-system",
+     "olmo2-1b/template-2-suffix",
+     "olmo2-1b/template-4-system",
+     "olmo2-1b/tokenizer-normalizer",
+     "olmo2-1b/tokenizer-swap",
+     "qwen3-0.6b/F1",
+     "qwen3-0.6b/F2",
+     "qwen3-0.6b/F3",
+     "qwen3-0.6b/F3G",
+     "qwen3-0.6b/F3G4",
+     "qwen3-0.6b/head-boost-s11",
+     "qwen3-0.6b/head-boost-s7",
+     "qwen3-0.6b/head-boost-subtle",
+     "qwen3-0.6b/norm-spike-l3",
+     "qwen3-0.6b/norm-spike-subtle",
+     "qwen3-0.6b/row-implant-s11",
+     "qwen3-0.6b/row-implant-s23",
+     "qwen3-0.6b/row-implant-s7",
+     "qwen3-0.6b/row-implant-s7-Q4_0",
+     "qwen3-0.6b/row-implant-s7-Q8_0",
+     "qwen3-0.6b/row-implant-subtle",
+     "qwen3-0.6b/template-0-prefix",
+     "qwen3-0.6b/template-1-system",
+     "qwen3-0.6b/template-2-suffix",
+     "qwen3-0.6b/template-4-system",
+     "qwen3-0.6b/tokenizer-normalizer",
+     "qwen3-0.6b/tokenizer-swap",
+     "smollm2-360m/head-boost-s11",
+     "smollm2-360m/head-boost-s7",
+     "smollm2-360m/head-boost-subtle",
+     "smollm2-360m/norm-spike-l3",
+     "smollm2-360m/norm-spike-subtle",
+     "smollm2-360m/row-implant-s11",
+     "smollm2-360m/row-implant-s23",
+     "smollm2-360m/row-implant-s7",
+     "smollm2-360m/row-implant-s7-Q4_0",
+     "smollm2-360m/row-implant-s7-Q8_0",
+     "smollm2-360m/row-implant-subtle",
+     "smollm2-360m/template-0-prefix",
+     "smollm2-360m/template-1-system",
+     "smollm2-360m/template-2-suffix",
+     "smollm2-360m/template-4-system",
+     "smollm2-360m/tokenizer-normalizer",
+     "smollm2-360m/tokenizer-swap"
+    ]
+   },
+   "benign": {
+    "n": 47,
+    "flagged": 0,
+    "clean": 47,
+    "inconclusive": 0,
+    "ci95": [
+     0.0,
+     0.07555760526591085
+    ],
+    "false_alarms": []
+   },
+   "by_threat": {
+    "prompt_injection": {
+     "n": 25,
+     "detected": 7
+    },
+    "trained_behaviour": {
+     "n": 2,
+     "detected": 0
+    },
+    "weight_implants": {
+     "n": 34,
+     "detected": 0
+    }
+   },
+   "in_scope": "Of the tampering this level tests (all but trained-in behaviour, which needs behavioural probes), it flagged 7/59 (95% CI 6%-23%)."
+  },
+  "standard": {
+   "tampered": {
+    "n": 61,
+    "detected": 59,
+    "confident": 25,
+    "ci95": [
+     0.8881050949020723,
+     0.9909621096830186
+    ],
+    "missed": [
+     "qwen3-0.6b/F1",
+     "qwen3-0.6b/F2"
+    ]
+   },
+   "benign": {
+    "n": 47,
+    "flagged": 2,
+    "clean": 45,
+    "inconclusive": 0,
+    "ci95": [
+     0.01174827586093439,
+     0.142485277892984
+    ],
+    "false_alarms": [
+     "qwen3-0.6b/mlx-bf16",
+     "smollm2-360m/unsloth"
+    ]
+   },
+   "by_threat": {
+    "prompt_injection": {
+     "n": 25,
+     "detected": 25
+    },
+    "trained_behaviour": {
+     "n": 2,
+     "detected": 0
+    },
+    "weight_implants": {
+     "n": 34,
+     "detected": 34
+    }
+   },
+   "in_scope": "Of the tampering this level tests (all but trained-in behaviour, which needs behavioural probes), it flagged 59/59 (95% CI 94%-100%)."
+  },
+  "thorough": {
+   "tampered": {
+    "n": 4,
+    "detected": 4,
+    "confident": 4,
+    "ci95": [
+     0.5101091596030786,
+     0.9999999999999999
+    ],
+    "missed": []
+   },
+   "benign": {
+    "n": 2,
+    "flagged": 0,
+    "clean": 2,
+    "inconclusive": 0,
+    "ci95": [
+     0.0,
+     0.6576197760453506
+    ],
+    "false_alarms": []
+   },
+   "by_threat": {
+    "prompt_injection": {
+     "n": 1,
+     "detected": 1
+    },
+    "trained_behaviour": {
+     "n": 2,
+     "detected": 2
+    },
+    "weight_implants": {
+     "n": 1,
+     "detected": 1
+    }
+   }
+  }
+ }
+}

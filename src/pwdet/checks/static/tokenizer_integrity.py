@@ -19,7 +19,7 @@ TOK_FILES = (
     "special_tokens_map.json",
     "tokenizer.model",
 )
-ZERO_WIDTH = {"​", "‌", "‍", "⁠", "﻿", "᠎"}
+ZERO_WIDTH = {"​", "‌", "‍", "⁠", "⁡", "⁢", "⁣", "⁤", "﻿", "᠎"}
 BIDI = {chr(c) for c in range(0x202A, 0x202F)} | {chr(c) for c in range(0x2066, 0x206A)}
 URLISH = re.compile(r"https?://|www\.|\.(com|net|org|io|ru|cn)\b", re.I)
 
@@ -37,6 +37,22 @@ def suspicious_text(s: str) -> list[str]:
     if len(s) > 64:
         why.append(f"very long ({len(s)} chars)")
     return why
+
+
+def _content(v: Any) -> str | None:
+    return v.get("content") if isinstance(v, dict) else v
+
+
+def role_tokens(tcfg: dict[str, Any]) -> set[str]:
+    """Visible special tokens this tokenizer assigns as its pad or unk token. Re-uploaders add
+    them routinely (a dedicated pad token for fine-tuning); padding is masked out and unk only
+    stands in for unencodable bytes, so neither can carry a trigger into a prompt."""
+    out = set()
+    for k in ("pad_token", "unk_token"):
+        c = _content(tcfg.get(k))
+        if isinstance(c, str) and c and not suspicious_text(c):
+            out.add(c)
+    return out
 
 
 def _added_tokens(tok: dict[str, Any]) -> dict[int, dict[str, Any]]:
@@ -233,15 +249,19 @@ def tokenizer_integrity(ctx: ScanContext) -> list[Finding]:
         rtok = ref_art.json("tokenizer.json") or {}
         evs: list[Evidence] = []
         at, rt = _added_tokens(tok), _added_tokens(rtok)
+        roles = role_tokens(tcfg)
+        role_added: list[Evidence] = []
         for tid in sorted(set(at) - set(rt)):
-            evs.append(
-                Evidence(
-                    kind="config_key",
-                    locator=f"tokenizer.json#added_tokens[{tid}]",
-                    summary=f"new token {at[tid].get('content')!r} "
-                    + _summ({k: v for k, v in at[tid].items() if k not in ("id", "content")}),
-                )
+            e = Evidence(
+                kind="config_key",
+                locator=f"tokenizer.json#added_tokens[{tid}]",
+                summary=f"new token {at[tid].get('content')!r} "
+                + _summ({k: v for k, v in at[tid].items() if k not in ("id", "content")}),
             )
+            if at[tid].get("special") and at[tid].get("content") in roles:
+                e.summary = "new pad/unk " + e.summary.removeprefix("new ")
+                role_added.append(e)
+            evs.append(e)
         for tid in sorted(set(rt) - set(at)):
             evs.append(
                 Evidence(
@@ -299,6 +319,8 @@ def tokenizer_integrity(ctx: ScanContext) -> list[Finding]:
             )
             else "medium"
         )
+        if evs and all(e in role_added for e in evs):
+            sev = "low"  # only a pad/unk token added
         if not evs:  # re-serialised: same tokens, same pipeline semantics, different bytes
             sev = "low"
         out.append(
@@ -324,14 +346,27 @@ def tokenizer_integrity(ctx: ScanContext) -> list[Finding]:
                 tags=["tokenizer"],
             )
         )
+
+    def _role_only_map(fn: str) -> bool:
+        if fn != "special_tokens_map.json":
+            return False
+        sa, sb = a.json(fn) or {}, ref_art.json(fn) or {}
+        changed = {k for k in set(sa) | set(sb) if sa.get(k) != sb.get(k)}
+        return (
+            bool(changed)
+            and changed <= {"pad_token", "unk_token"}
+            and all(_content(sa.get(k)) in role_tokens(tcfg) for k in changed)
+        )
+
     for fn in differing:
         if fn != "tokenizer.json":
             out.append(
                 Finding(
                     check_id="static.tokenizer_integrity",
-                    title=f"{fn} differs from {hop}",
+                    title=f"{fn} differs from {hop}"
+                    + (" (only the pad/unk token)" if _role_only_map(fn) else ""),
                     status="warn",
-                    severity="medium",
+                    severity="low" if _role_only_map(fn) else "medium",
                     confidence=0.7,
                     declared=declared,
                     hop="suspect",
@@ -410,11 +445,25 @@ def tokenizer_integrity(ctx: ScanContext) -> list[Finding]:
             "add_eos_token",
             "additional_special_tokens",
         }
+        roles = role_tokens(tcfg)
+
+        def _role_change(e: Evidence) -> bool:
+            key = e.locator.split("#")[1]
+            if key in ("pad_token", "unk_token"):
+                return _content(tcfg.get(key)) in roles
+            if key.startswith("added_tokens_decoder["):
+                entry = (tcfg.get("added_tokens_decoder") or {}).get(key[21:-1]) or {}
+                return bool(entry.get("special")) and entry.get("content") in roles
+            return False
+
         sev = (
             "medium"
             if any(
-                any(e.locator.endswith("#" + ck) for ck in critical_keys)
-                or "added_tokens_decoder" in e.locator
+                (
+                    any(e.locator.endswith("#" + ck) for ck in critical_keys)
+                    or "added_tokens_decoder" in e.locator
+                )
+                and not _role_change(e)
                 for e in evs
             )
             else "low"

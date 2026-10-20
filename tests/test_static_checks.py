@@ -314,3 +314,80 @@ def test_resaved_snapshot_is_clean(snapshot_pair, tmp_path):
         if f.status in ("warn", "fail") and f.effective_severity not in ("info", "low")
     ]
     assert not bad, _titles(bad)
+
+
+# ---- false-alarm causes found by the evaluation corpus --------------------------------------
+
+
+def test_unknown_class_in_a_training_artefact_is_low(tmp_path):
+    blob = pickle.dumps(Custom(), protocol=4)
+    snap = make_snapshot(tmp_path / "a", extra_files={"training_args.bin": blob})
+    (f,) = [x for x in _run(_ctx(snap), "static.pickle_payload") if x.status == "warn"]
+    assert f.severity == "low" and "training artefact" in f.title
+    snap = make_snapshot(tmp_path / "b", extra_files={"pytorch_model.bin": blob})
+    (f,) = [x for x in _run(_ctx(snap), "static.pickle_payload") if x.status == "warn"]
+    assert f.severity == "medium"
+
+
+def test_serving_defaults_and_js_dtype_map_are_not_tampering(snapshot_pair):
+    sus, base = snapshot_pair
+    cfg = json.loads((sus / "config.json").read_text())
+    cfg["max_position_embeddings"] = 1234
+    cfg["pad_token_id"] = 7
+    cfg["transformers.js_config"] = {"kv_cache_dtype": {"fp16": "float16"}}
+    (sus / "config.json").write_text(json.dumps(cfg))
+    gp = sus / "generation_config.json"
+    gen = json.loads(gp.read_text()) if gp.exists() else {}
+    gp.write_text(json.dumps({**gen, "temperature": 0.1, "top_p": 0.5}))
+    out = _run(_ctx(sus, base), "static.config_drift")
+    assert all(f.effective_severity in ("info", "low") for f in out), _titles(out)
+    assert any("serving config key(s)" in f.title for f in out)
+    cfg["transformers.js_config"] = {"loader": "https://example.net/x.js"}
+    (sus / "config.json").write_text(json.dumps(cfg))
+    out = _run(_ctx(sus, base), "static.config_drift")
+    assert any(f.severity == "high" and "custom code" in f.title for f in out), _titles(out)
+
+
+def test_added_pad_token_is_low_but_an_unassigned_special_token_is_not(snapshot_pair):
+    sus, base = snapshot_pair
+
+    def add(content, assign):
+        tok = json.loads((base / "tokenizer.json").read_text())
+        tok["added_tokens"] = tok.get("added_tokens", []) + [
+            {
+                "id": 999,
+                "content": content,
+                "special": True,
+                "lstrip": False,
+                "rstrip": False,
+                "normalized": False,
+                "single_word": False,
+            }
+        ]
+        (sus / "tokenizer.json").write_text(json.dumps(tok))
+        tc = json.loads((base / "tokenizer_config.json").read_text())
+        if assign:
+            tc["pad_token"] = content
+        (sus / "tokenizer_config.json").write_text(json.dumps(tc))
+        return _run(_ctx(sus, base), "static.tokenizer_integrity")
+
+    out = add("<|PAD_TOKEN|>", True)
+    assert all(f.effective_severity in ("info", "low") for f in out), _titles(out)
+    out = add("<|PAD_TOKEN|>", False)
+    assert any(f.severity == "high" for f in out), _titles(out)
+    out = add("⁣", True)  # an invisible token is never a harmless pad token
+    assert any(f.severity == "high" for f in out), _titles(out)
+
+
+def test_render_error_is_a_compatibility_note(snapshot_pair):
+    sus, base = snapshot_pair
+    # a template that only renders list content, as some re-uploads ship: string content breaks
+    broken = QWEN_LIKE_TEMPLATE.replace("message.content +", "(message.content | first)['text'] +")
+    assert broken != QWEN_LIKE_TEMPLATE
+    tc = json.loads((sus / "tokenizer_config.json").read_text())
+    tc["chat_template"] = broken
+    (sus / "tokenizer_config.json").write_text(json.dumps(tc))
+    (sus / "chat_template.jinja").write_text(broken)
+    out = _run(_ctx(sus, base), "static.chat_template")
+    errs = [f for f in out if "fails to render" in f.title]
+    assert errs and errs[0].severity == "low", _titles(out)

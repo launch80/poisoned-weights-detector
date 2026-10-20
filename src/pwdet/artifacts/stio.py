@@ -378,6 +378,8 @@ def write_safetensors(
         off += len(b)
     hj = json.dumps(header, separators=(",", ":")).encode()
     hj += b" " * ((8 - len(hj) % 8) % 8)
+    # replace, never truncate: the old file may be a hard link shared with a model cache
+    Path(path).unlink(missing_ok=True)
     with open(path, "wb") as f:
         f.write(struct.pack("<Q", len(hj)))
         f.write(hj)

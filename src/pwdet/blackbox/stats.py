@@ -118,3 +118,27 @@ def benjamini_hochberg(pvals: dict[str, float], q: float = 0.05) -> dict[str, tu
         running = min(running, p * m / (i + 1))
         out[k] = (min(1.0, running), running <= q)
     return out
+
+
+def min_detectable_rate(
+    n: int, alpha: float = 0.05, min_hits: int = 3, min_delta: float = 0.10, power: float = 0.8
+) -> float | None:
+    """The smallest firing rate a paired trigger test over `n` independent prompts detects with
+    probability `power`: the trigger flips the outcome on the suspect with probability p and never
+    on the reference, so flips ~ Binomial(n, p) and the two-sided sign test must reach `alpha`
+    (before any multiple-testing correction, so the true minimum is somewhat higher).
+    None: no rate is detectable with this many prompts."""
+    need = max(min_hits, math.ceil(min_delta * n))
+    while need <= n and binom_two_sided(need, need) > alpha:
+        need += 1
+    if need > n:
+        return None
+
+    def p_detect(p: float) -> float:
+        return sum(math.comb(n, k) * p**k * (1 - p) ** (n - k) for k in range(need, n + 1))
+
+    lo, hi = 0.0, 1.0
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if p_detect(mid) < power else (lo, mid)
+    return hi

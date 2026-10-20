@@ -54,7 +54,10 @@ def behavioural_findings(
 ) -> list[Finding]:
     results = rescore(load_results(variant_run / "results.json"))
     results["reference"] = rescore(load_results(base_run / "results.json"))["suspect"]
-    return analyze(results, "suspect", "reference", thresholds)
+    from ..blackbox.differential import power_statement
+
+    pw = power_statement(results, thresholds)
+    return [*([pw] if pw else []), *analyze(results, "suspect", "reference", thresholds)]
 
 
 def evaluate(

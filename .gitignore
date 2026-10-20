@@ -10,3 +10,5 @@ runs/
 eval/*.json
 *.egg-info/
 pwdet.yaml
+
+!eval/baseline.json

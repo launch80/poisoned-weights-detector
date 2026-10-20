@@ -48,7 +48,7 @@ details{margin:6px 0}summary{cursor:pointer}summary.muted:hover{color:var(--fg)}
 
 <div class="card">
  <div class="verdict" style="color:var(--{{ worst }})">{{ r.verdict.label if r.verdict else 'n/a' }}{% if r.assurance %} <span class="muted" style="font-size:1rem">· {{ r.assurance.level }}</span>{% endif %}</div>
- {% if r.assurance %}<div>{{ r.assurance.summary }}</div>{% endif %}
+ {% if r.assurance %}<div>{{ r.assurance.summary }}</div>{% if r.assurance.accuracy_text %}<div class="muted">{{ r.assurance.accuracy_text }}</div>{% endif %}{% endif %}
  <div class="counts">{% for s, n in counts.items() %}{% if n %}<span><span class="badge {{ s }}">{{ s }}</span> {{ n }}</span>{% endif %}{% endfor %}
   <span><span class="badge pass">pass</span> {{ n_pass }}</span><span><span class="badge skipped">skipped</span> {{ n_skip }}</span>{% if n_err %}<span><span class="badge error">error</span> {{ n_err }}</span>{% endif %}</div>
  {% if r.verdict and r.verdict.rationale %}<ul>{% for line in r.verdict.rationale %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
@@ -92,7 +92,7 @@ details{margin:6px 0}summary{cursor:pointer}summary.muted:hover{color:var(--fg)}
 <tr><th>severity</th><th>confidence</th><th>check</th><th>finding</th><th>hop</th></tr>
 {% for f in flagged %}
 <tr class="sev-row" style="--sev:var(--{{ f.effective_severity }})"><td><span class="badge {{ f.effective_severity }}">{{ f.effective_severity }}</span>{% if f.declared %} <span class="muted">declared</span>{% endif %}</td>
- <td class="num">{{ '%.2f'|format(f.confidence) }}</td><td><code>{{ f.check_id }}</code></td><td><a href="#f{{ loop.index }}">{{ f.title }}</a></td><td class="muted">{{ f.hop or '' }}</td></tr>
+ <td class="num"{% if f.confidence_basis %} title="{{ f.confidence_basis }}"{% endif %}>{{ '%.2f'|format(f.confidence) }}</td><td><code>{{ f.check_id }}</code></td><td><a href="#f{{ loop.index }}">{{ f.title }}</a></td><td class="muted">{{ f.hop or '' }}</td></tr>
 {% endfor %}
 </table>
 {% else %}
@@ -115,7 +115,7 @@ details{margin:6px 0}summary{cursor:pointer}summary.muted:hover{color:var(--fg)}
 {% set fi = flagged.index(f) + 1 %}
 <div class="card flagged" id="f{{ fi }}" style="--sev:var(--{{ f.effective_severity }})">
  <div><span class="badge {{ f.effective_severity }}">{{ f.effective_severity }}</span>
-  <b>{{ f.title }}</b> <span class="muted"><code>{{ f.check_id }}</code> · confidence {{ '%.2f'|format(f.confidence) }}{% if f.declared %} · declared by publisher (severity {{ f.severity }} → {{ f.effective_severity }}){% endif %}{% if f.hop %} · hop {{ f.hop }}{% endif %}{% if f.tags %} · {{ f.tags|join(', ') }}{% endif %}</span></div>
+  <b>{{ f.title }}</b> <span class="muted"><code>{{ f.check_id }}</code> · confidence {{ '%.2f'|format(f.confidence) }}{% if f.confidence_basis %} ({{ f.confidence_basis }}){% endif %}{% if f.declared %} · declared by publisher (severity {{ f.severity }} → {{ f.effective_severity }}){% endif %}{% if f.hop %} · hop {{ f.hop }}{% endif %}{% if f.tags %} · {{ f.tags|join(', ') }}{% endif %}</span></div>
  {% if f.remediation %}<div class="muted">↳ {{ f.remediation }}</div>{% endif %}
  {% if f.evidence %}
  <details open><summary>{{ f.evidence|length }} evidence item{{ 's' if f.evidence|length != 1 }}</summary>

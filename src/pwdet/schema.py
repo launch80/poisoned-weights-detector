@@ -53,6 +53,11 @@ class Finding(BaseModel):
     status: Status
     severity: Severity = "info"
     confidence: float = Field(0.5, ge=0.0, le=1.0)
+    confidence_basis: str | None = Field(
+        None,
+        description="where the confidence comes from: measured on the evaluation corpus, or "
+        "estimated by the check when the corpus has too few examples of this kind",
+    )
     declared: bool = Field(False, description="publisher disclosed this modification")
     hop: Hop | None = Field(None, description="lineage hop that introduced the observation")
     evidence: list[Evidence] = Field(default_factory=list)
@@ -172,6 +177,12 @@ class Assurance(BaseModel):
     summary: str
     threats: list[ThreatCoverage] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
+    accuracy: dict[str, Any] | None = Field(
+        None,
+        description="how scans at this level fared on the evaluation corpus: tampered detected "
+        "and benign flagged, with 95% intervals",
+    )
+    accuracy_text: str | None = None
 
 
 class Report(BaseModel):

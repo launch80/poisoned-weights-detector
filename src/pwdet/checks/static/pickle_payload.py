@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import re
+
 from ...artifacts.pickle_scan import scan_file
 from ...context import ScanContext
 from ...registry import check
 from ...schema import Evidence, Finding
+
+# Files a model loader reads when the model is loaded. Anything else that is pickle-based
+# (training_args.bin, optimizer.pt, scheduler.pt, rng_state.pth) is a training artefact that
+# from_pretrained never opens: a dangerous import in it is still critical (someone may load it),
+# but an unrecognised class is noted, not counted as evidence of tampering.
+LOADED = re.compile(
+    r"(^|/)(pytorch_model|model|adapter_model|consolidated)[\w.-]*\.(bin|pt|pth)$|\.ckpt$", re.I
+)
 
 
 @check(
@@ -53,13 +63,15 @@ def pickle_payload(ctx: ScanContext) -> list[Finding]:
             if g.module.split(".")[0] not in ("torch", "numpy", "collections")
         ]
         softunk = [g for g in res.unknown if g not in unknown]
+        loaded = bool(LOADED.search(f.rel))
         if unknown:
             out.append(
                 Finding(
                     check_id="static.pickle_payload",
-                    title=f"{f.rel}: pickle references {len(unknown)} non-standard callable(s)",
+                    title=f"{f.rel}: pickle references {len(unknown)} non-standard callable(s)"
+                    + ("" if loaded else " (training artefact; model loaders do not read it)"),
                     status="warn",
-                    severity="medium",
+                    severity="medium" if loaded else "low",
                     confidence=0.7,
                     evidence=[ev_common]
                     + [

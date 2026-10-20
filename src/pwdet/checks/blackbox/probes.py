@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...blackbox.differential import analyze, load_thresholds
+from ...blackbox.differential import analyze, load_thresholds, power_statement
 from ...blackbox.runner import ModelEndpoint, run_all, save_results
 from ...blackbox.suite import expand, load_suites
 from ...context import ScanContext
@@ -91,4 +91,5 @@ def run(ctx: ScanContext) -> list[Finding]:
         ],
         tags=["coverage"],
     )
-    return [cov, *findings]
+    pw = power_statement(results, th)
+    return [cov, *([pw] if pw else []), *findings]

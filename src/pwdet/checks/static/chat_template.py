@@ -449,10 +449,33 @@ def chat_template(ctx: ScanContext) -> list[Finding]:
                     kind="diff",
                     locator=f"render:{name}",
                     summary="whitespace only" if ws_only else d[:1500],
-                    data={"whitespace_only": ws_only},
+                    data={
+                        "whitespace_only": ws_only,
+                        # the suspect cannot render a conversation the reference renders: a
+                        # compatibility break, not new content reaching the model
+                        "render_error_only": r_s[name].startswith("<render error")
+                        and not r_r.get(name, "").startswith("<render error"),
+                    },
                 )
             )
     substantive = [d for d in diffs if not d.data.get("whitespace_only")]
+    broken = [d for d in substantive if d.data.get("render_error_only")]
+    if broken:
+        out.append(
+            Finding(
+                check_id="static.chat_template",
+                title=f"template fails to render {len(broken)} canonical conversation(s) that "
+                f"{hop} renders",
+                status="warn",
+                severity="low",
+                confidence=0.8,
+                hop="suspect",
+                evidence=broken[:12],
+                remediation="A render error injects nothing, but that input type will fail at serving time.",
+                tags=["template"],
+            )
+        )
+        substantive = [d for d in substantive if d not in broken]
     if substantive:
         out.append(
             Finding(

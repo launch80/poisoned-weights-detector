@@ -218,6 +218,55 @@ this run under-reported F3's static checks because the long-running `fixture eva
 check modules that were being edited underneath it; the metrics above are from a rerun against the
 cached probe results, and `fixture eval` now lists errored checks explicitly so that cannot pass silently.
 
+### Evaluation corpus and calibration
+
+```bash
+uv run pwdet corpus build                 # make every item in eval/corpus.yaml that is not on disk
+uv run pwdet corpus eval --jobs 6         # scan each item at basic, standard and thorough -> eval/corpus.md
+uv run pwdet corpus calibrate --rerun     # measured floors, confidence, accuracy -> src/pwdet/calibration.json
+uv run pwdet corpus gate                  # exit 1 if an attack that was flagged is missed, or a clean model is flagged
+```
+
+`eval/corpus.yaml` lists every item with its label: `tampered` (built attacks with known ground
+truth), `benign` (built format and serving changes) and `presumed_benign` (community re-uploads
+pinned to a Hub commit, which count towards false alarms only). Each item is scanned exactly as
+`pwdet scan` would scan it, and the final **verdict** is scored, not single checks.
+
+From a corpus run, `calibrate` writes `calibration.json`, which the checks read:
+
+- **Noise floors** per GGUF quantisation type: the worst 99th-percentile row error over benign
+  conversions of that type, times 1.5. Formats with no benign conversion in the corpus keep a
+  default and the finding says so.
+- **Confidence** per (check, severity): the lower bound of a 95% Wilson interval on how often that
+  kind of finding was right. Kinds with fewer than 10 corpus examples keep the check's estimate, and
+  every finding records which (`confidence_basis`).
+- **Accuracy** per assurance level, quoted in each report ("On the pwdet corpus v1 ...").
+
+Code-on-load threats (pickle payloads, remote code) are tested by the unit tests of those checks,
+not by built corpus items.
+
+Measured on 2026-10-19 (`eval/corpus.md`): 108 items over four families (Qwen3-0.6B, SmolLM2-360M,
+OLMo-2-1B, plus one Qwen3-1.7B re-upload): 61 tampered, 47 benign or presumed benign. Flagged means a
+verdict of suspicious or worse; intervals are 95%.
+
+| level | tampered flagged | benign flagged |
+|---|---|---|
+| Basic (no reference) | 7/61 (6-22%): prompt-level edits only, no weight implant | 0/47 (0-8%) |
+| Standard (reference compared) | 59/61 (89-99%); 59/59 of what it tests | 2/47 (1-14%) |
+| Thorough (behaviour, Qwen3-0.6B fixtures only) | 4/4 (51-100%), including both trained-in triggers | 0/2 |
+
+Standard misses only F1 and F2, the trained-in behaviours, which no static check can see. The two
+benign models it flags are real changes: a re-upload that drops `eos_token_id` from the generation
+config, and one that grows the vocabulary by a pad token.
+
+The first corpus run flagged 20/47 benign models at Standard. Each cause was a rule, not a model:
+serving defaults (sampling, context length, bos/pad ids) graded as behaviour changes, a
+transformers.js dtype map read as remote code, unrecognised classes in `training_args.bin` (which
+no loader reads) graded medium, template render errors graded as injections, added pad/unk tokens
+graded as hidden tokens, and low-norm embedding rows tripping the outlier test under uniform drift.
+The rules were fixed with unit tests for each, and detection did not change (59/59). These fixes
+were found on the same corpus they are measured on; new families are the out-of-sample check.
+
 ## Layout
 
 ```
@@ -263,4 +312,8 @@ while F3 (surgery) and F4 (template injection) stay `likely_tampered`.
 - The white-box layer localises implants (F3) but not full-parameter fine-tunes (F1/F2): those are
   caught behaviourally, not by weight deltas.
 - Exact paired tests need about eight paired items per hypothesis to reach significance; the packaged
-  trigger suites use k=8 paraphrases for that reason.
+  trigger suites use k=8 paraphrases for that reason. That is also their limit: with 8 independent
+  prompts, a trigger has to fire on about 80% of matching prompts to be caught with 80% probability
+  (24 prompts: about 31%). Every probe run reports this as its power statement.
+- A Basic scan (no reference) misses weight implants entirely and most prompt-level edits; the
+  corpus numbers above show how much a reference adds.

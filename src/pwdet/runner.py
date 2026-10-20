@@ -6,7 +6,7 @@ import platform
 import time
 from collections.abc import Callable
 
-from . import __version__
+from . import __version__, calibration
 from .assurance import assess
 from .context import FIRST_PARTY_NA, ScanContext
 from .registry import CheckSpec
@@ -44,6 +44,7 @@ def run_checks(
                 out = [Finding.passed(spec.id, "no observations")]
             for f in out:
                 f.check_id = f.check_id or spec.id
+                calibration.apply(f)
                 for t in spec.tags:
                     if t not in f.tags:
                         f.tags.append(t)
@@ -91,4 +92,6 @@ def build_report(
             ctx.shared.get("first_party_subject") and ctx.shared.get("hub_identical")
         ),
     )
+    rep.assurance.accuracy = calibration.accuracy(rep.assurance.level)
+    rep.assurance.accuracy_text = calibration.accuracy_text(rep.assurance.level)
     return rep
