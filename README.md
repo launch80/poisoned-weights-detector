@@ -253,7 +253,9 @@ uv run pwdet reproduce reports/<run>/report.json      # exit 0 when within toler
 
 `reproduce` re-runs the scan from those inputs and compares: the files must hash the same, the digest
 must match exactly, and the same behavioural probes must come out significant (counts vary a little
-with sampling). Launch80 uses it to verify a published scan.
+with sampling). It always runs with `--no-cache`: the models are served and asked again, and white-box
+runs again, instead of reusing answers a scan on the same machine left in `~/.cache/pwdet`. Launch80
+uses it to verify a published scan.
 
 ### Evaluation corpus and calibration
 

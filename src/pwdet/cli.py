@@ -215,6 +215,12 @@ def scan(
         None, help="its reference already served: http://host:port/v1#model"
     ),
     port: int = typer.Option(8010, help="local port for --serve"),
+    no_cache: bool = typer.Option(
+        False,
+        "--no-cache",
+        help="ask the models again instead of reusing cached probe answers and white-box results "
+        "(pwdet reproduce always does)",
+    ),
 ) -> None:
     settings = load_settings(str(config) if config else None)
     if offline:
@@ -252,6 +258,7 @@ def scan(
             "invert_steps": invert_steps,
             "serve": do_serve and not endpoint,
             "port": port,
+            "no_cache": no_cache,
             "log": log,
         },
     )
@@ -927,7 +934,9 @@ def reproduce_cmd(
     subj = spec(inp["subject"], model, old.subject.path)
     if not subj or (not subj.count("@") and not Path(subj).exists()):
         raise typer.BadParameter("the model's files are not at the recorded place: pass --model")
-    args = [sys.executable, "-m", "pwdet.cli", "scan", subj, "--json-only", "--out", str(out)]
+    # a re-run that read the first scan's cached answers would only repeat them
+    args = [sys.executable, "-m", "pwdet.cli", "scan", subj, "--json-only", "--no-cache"]
+    args += ["--out", str(out)]
     args += ["--profile", inp.get("profile") or "standard"]
     refs = {r.key: r for r in old.references}
     for hop, rec in (inp.get("references") or {}).items():

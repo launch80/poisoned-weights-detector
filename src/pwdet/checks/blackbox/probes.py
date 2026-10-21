@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from ...blackbox.differential import analyze, load_thresholds, power_statement
@@ -12,6 +13,11 @@ from ...registry import check
 from ...schema import Evidence, Finding
 
 SAMPLED_T = 0.7
+
+
+def _mkdirs(p: Path) -> Path:
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def _slug(s: str) -> str:
@@ -77,10 +83,13 @@ def run(ctx: ScanContext) -> list[Finding]:
             ctx.shared["probe_reference_hop"] = hop
             break
     ref_key = next((t[1].key for t in targets if t[0] == "reference"), "none")  # type: ignore[attr-defined]
+    fresh = bool(opts.get("no_cache"))
     run_dir = Path(
         opts.get("run_dir")
         or (
-            ctx.settings.cache_path
+            tempfile.mkdtemp(prefix="fresh-", dir=_mkdirs(ctx.settings.cache_path / "runs"))
+            if fresh
+            else ctx.settings.cache_path
             / "runs"
             / f"{ctx.subject.key.replace('/', '--')}--vs--{ref_key.replace('/', '--')}"
         )
@@ -99,7 +108,9 @@ def run(ctx: ScanContext) -> list[Finding]:
         # a reference answers the same prompts for every model compared with it: its answers are
         # kept per reference, so a second scan against the same base does not ask it again
         rdir = run_dir
-        if label == "reference":
+        if label == "reference" and fresh:
+            rdir = run_dir / "reference"
+        elif label == "reference":
             ident = getattr(ref, "path", None) or getattr(ref, "endpoint", None) or ref.key  # type: ignore[attr-defined]
             rdir = ctx.settings.cache_path / "runs" / "references" / _slug(f"{ref.key}-{ident}")  # type: ignore[attr-defined]
         if getattr(ref, "endpoint", None):
